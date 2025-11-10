@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { LocationSelector, Location } from "@/components/LocationSelector";
 import { MetricCard } from "@/components/MetricCard";
 import {
   Ticket,
@@ -14,23 +13,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 // ========================
 // Tipos
 // ========================
-type Variant = "primary" | "accent" | "success" | "warning" | "default"; // ajustá a los variants reales de tu <MetricCard />
+type Variant = "primary" | "accent" | "success" | "warning" | "default";
 
-interface LocationMetrics {
+interface Metrics {
   entradas: number | null;
-  recaudacion: number | null; // en moneda menor (p.ej. ARS centavos) o entero
-  ocupacion: number | null; // porcentaje 0-100
-  stock: number | null; // cantidad de alertas
+  recaudacion: number | null;
+  ocupacion: number | null;
+  stock: number | null;
 }
-
-type MetricsByLocation = Partial<Record<Location, LocationMetrics>>;
 
 interface EventItem {
   id?: string | number;
   title: string;
-  date: string; // ISO o label corto ("15 Nov")
-  location: string; // sucursal/nombre
-  ocupacion: number; // 0-100
+  date: string;
+  ocupacion: number;
 }
 
 type StockStatus = "bajo" | "ok" | "critico";
@@ -45,22 +41,25 @@ interface StockItem {
 
 interface GlobalSummary {
   totalEntradas: number | null;
-  totalRecaudacion: number | null; // en moneda menor o entero
-  ocupacionPromedio: number | null; // 0-100
+  totalRecaudacion: number | null;
+  ocupacionPromedio: number | null;
 }
 
-// (Opcional) Estructura de respuesta del backend para tipar el fetch
+// (Opcional) Estructura de respuesta del backend
 interface DashboardResponse {
-  metrics: MetricsByLocation;
+  metrics: Metrics;
   events: EventItem[];
   stock: StockItem[];
   globalSummary: GlobalSummary;
 }
 
 export default function Index() {
-  const [selectedLocation, setSelectedLocation] = useState<Location>("santas");
-
-  const [metrics, setMetrics] = useState<MetricsByLocation>({});
+  const [metrics, setMetrics] = useState<Metrics>({
+    entradas: null,
+    recaudacion: null,
+    ocupacion: null,
+    stock: null,
+  });
   const [events, setEvents] = useState<EventItem[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [globalSummary, setGlobalSummary] = useState<GlobalSummary>({
@@ -71,21 +70,18 @@ export default function Index() {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // 🔹 Ejemplo: Cargar datos reales del backend
-    // (asegurate de que el endpoint devuelva el shape de DashboardResponse)
+    // Ejemplo: Cargar datos reales del backend
     // fetch("/api/dashboard")
     //   .then((res) => res.json() as Promise<DashboardResponse>)
     //   .then((data) => {
     //     setMetrics(data.metrics ?? {});
     //     setEvents(Array.isArray(data.events) ? data.events : []);
     //     setStockItems(Array.isArray(data.stock) ? data.stock : []);
-    //     setGlobalSummary(
-    //       data.globalSummary ?? {
-    //         totalEntradas: null,
-    //         totalRecaudacion: null,
-    //         ocupacionPromedio: null,
-    //       }
-    //     );
+    //     setGlobalSummary(data.globalSummary ?? {
+    //       totalEntradas: null,
+    //       totalRecaudacion: null,
+    //       ocupacionPromedio: null,
+    //     });
     //   })
     //   .catch((err) => console.error("Error al cargar dashboard:", err))
     //   .finally(() => setLoading(false));
@@ -93,31 +89,18 @@ export default function Index() {
     setLoading(false); // eliminar cuando se integre la API real
   }, []);
 
-  // fallback seguro si todavía no hay métricas para la location seleccionada
-  const emptyMetrics: LocationMetrics = {
-    entradas: null,
-    recaudacion: null,
-    ocupacion: null,
-    stock: null,
-  };
-  const currentMetrics: LocationMetrics =
-    metrics[selectedLocation] ?? emptyMetrics;
-
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* HEADER */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-5xl font-bold bg-gradient-primary bg-clip-text text-transparent mb-2">
-            Dashboard
+            Dashboard Santas
           </h1>
           <p className="text-muted-foreground text-lg">
             Control en tiempo real de todas las operaciones
           </p>
         </div>
-        <LocationSelector
-          selectedLocation={selectedLocation}
-          onLocationChange={setSelectedLocation}
-        />
       </div>
 
       {/* MÉTRICAS PRINCIPALES */}
@@ -125,11 +108,7 @@ export default function Index() {
         <MetricCard
           title="Entradas Vendidas"
           value={
-            loading
-              ? "—"
-              : currentMetrics.entradas !== null
-                ? currentMetrics.entradas
-                : "—"
+            loading ? "—" : metrics.entradas !== null ? metrics.entradas : "—"
           }
           icon={Ticket}
           variant={"primary" as Variant}
@@ -139,8 +118,8 @@ export default function Index() {
           value={
             loading
               ? "—"
-              : currentMetrics.recaudacion !== null
-                ? `$${(currentMetrics.recaudacion / 1000).toFixed(1)}K`
+              : metrics.recaudacion !== null
+                ? `$${(metrics.recaudacion / 1000).toFixed(1)}K`
                 : "—"
           }
           icon={DollarSign}
@@ -151,8 +130,8 @@ export default function Index() {
           value={
             loading
               ? "—"
-              : currentMetrics.ocupacion !== null
-                ? `${currentMetrics.ocupacion}%`
+              : metrics.ocupacion !== null
+                ? `${metrics.ocupacion}%`
                 : "—"
           }
           icon={TrendingUp}
@@ -160,16 +139,10 @@ export default function Index() {
         />
         <MetricCard
           title="Alertas de Stock"
-          value={
-            loading
-              ? "—"
-              : currentMetrics.stock !== null
-                ? currentMetrics.stock
-                : "—"
-          }
+          value={loading ? "—" : metrics.stock !== null ? metrics.stock : "—"}
           icon={AlertCircle}
           variant={
-            currentMetrics.stock && currentMetrics.stock > 0
+            metrics.stock && metrics.stock > 0
               ? ("warning" as Variant)
               : ("default" as Variant)
           }
@@ -203,7 +176,7 @@ export default function Index() {
                       {event.title}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {event.date} · {event.location}
+                      {event.date}
                     </p>
                   </div>
                   <div className="text-right">
@@ -216,59 +189,12 @@ export default function Index() {
             )}
           </CardContent>
         </Card>
-
-        {/* STOCK */}
-        <Card className="border-border">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-warning" />
-              Stock Crítico
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {loading ? (
-              <p className="text-muted-foreground text-sm">Cargando...</p>
-            ) : stockItems.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
-                No hay alertas de stock
-              </p>
-            ) : (
-              stockItems.map((item) => (
-                <div
-                  key={item.id ?? item.product}
-                  className="flex items-center justify-between p-3 bg-warning/10 border border-warning/30 rounded-lg"
-                >
-                  <div className="flex-1">
-                    <p className="font-semibold text-foreground">
-                      {item.product}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Mínimo: {item.min} unidades
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-warning">
-                      {item.stock}
-                    </p>
-                    <p className="text-xs uppercase text-warning font-semibold">
-                      {item.status === "bajo"
-                        ? "Bajo"
-                        : item.status === "critico"
-                          ? "Crítico"
-                          : "OK"}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {/* RESUMEN GLOBAL */}
       <Card className="border-primary/30 bg-primary/5">
         <CardHeader>
-          <CardTitle>Resumen Global - Todas las Sucursales</CardTitle>
+          <CardTitle>Resumen Global - Santas</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (

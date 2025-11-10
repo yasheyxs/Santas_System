@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { LocationSelector, Location } from "@/components/LocationSelector";
 import { Ticket, Users, Crown, Calendar, CheckCircle } from "lucide-react";
 import { StatCounter } from "@/components/StatCounter";
 import { Button } from "@/components/ui/button";
@@ -28,33 +27,19 @@ interface EntryCounters {
   vip: number;
 }
 
-type CountersByLocation = Partial<Record<Location, EntryCounters>>;
-
-interface CapacityByLocation {
-  [key: string]: number;
-}
-
-interface EntradasResponse {
-  counters: CountersByLocation;
-  capacity: CapacityByLocation;
-}
-
 interface EventOption {
   id: string;
   name: string;
   capacity: number;
-  location: Location;
 }
 
-// ⚠️ Debe coincidir con StatCounterProps.variant
+// Debe coincidir con StatCounterProps.variant
 type StatCounterVariant = "primary" | "accent" | "success" | "default";
 
 export default function Entradas() {
-  const [selectedLocation, setSelectedLocation] = useState<Location>("santas");
   const [selectedEvent, setSelectedEvent] = useState<string>("");
   const [events, setEvents] = useState<EventOption[]>([]);
-  const [counters, setCounters] = useState<CountersByLocation>({});
-  const [capacity, setCapacity] = useState<CapacityByLocation>({});
+  const [counters, setCounters] = useState<Record<string, EntryCounters>>({});
   const [loading, setLoading] = useState<boolean>(true);
   const [showSummary, setShowSummary] = useState<boolean>(false);
 
@@ -72,37 +57,26 @@ export default function Entradas() {
         id: "1",
         name: "Noche de DJ Internacional",
         capacity: 300,
-        location: "santas",
       },
       {
         id: "2",
         name: "Pool Party Sunset",
         capacity: 200,
-        location: "outdoor",
       },
-      { id: "3", name: "Cumpleaños Temático", capacity: 80, location: "kiddo" },
     ];
 
     setEvents(simulatedEvents);
-    setCapacity({
-      santas: 300,
-      outdoor: 200,
-      kiddo: 80,
-    });
-
     setLoading(false);
   }, []);
 
-  const currentCounts: EntryCounters = counters[selectedLocation] ?? {
+  const currentCounts: EntryCounters = counters[selectedEvent] ?? {
     reservadas: 0,
     vendidas: 0,
     vip: 0,
   };
 
-  // Capacidad según evento seleccionado o fallback por sucursal
   const selectedEventData = events.find((e) => e.id === selectedEvent);
-  const maxCapacity =
-    selectedEventData?.capacity ?? capacity[selectedLocation] ?? 0;
+  const maxCapacity = selectedEventData?.capacity ?? 0;
 
   const totalEntradas =
     (currentCounts.reservadas ?? 0) +
@@ -112,9 +86,9 @@ export default function Entradas() {
   const handleIncrement = (type: keyof EntryCounters) => {
     setCounters((prev) => ({
       ...prev,
-      [selectedLocation]: {
-        ...prev[selectedLocation],
-        [type]: (prev[selectedLocation]?.[type] ?? 0) + 1,
+      [selectedEvent]: {
+        ...prev[selectedEvent],
+        [type]: (prev[selectedEvent]?.[type] ?? 0) + 1,
       },
     }));
   };
@@ -122,21 +96,18 @@ export default function Entradas() {
   const handleDecrement = (type: keyof EntryCounters) => {
     setCounters((prev) => ({
       ...prev,
-      [selectedLocation]: {
-        ...prev[selectedLocation],
-        [type]: Math.max(0, (prev[selectedLocation]?.[type] ?? 0) - 1),
+      [selectedEvent]: {
+        ...prev[selectedEvent],
+        [type]: Math.max(0, (prev[selectedEvent]?.[type] ?? 0) - 1),
       },
     }));
   };
 
-  const handleCloseEvent = () => {
-    setShowSummary(true);
-  };
+  const handleCloseEvent = () => setShowSummary(true);
 
   const handleConfirmClose = () => {
     console.log("Evento cerrado:", {
       evento: selectedEventData?.name,
-      location: selectedLocation,
       resumen: currentCounts,
       total: totalEntradas,
     });
@@ -149,16 +120,12 @@ export default function Entradas() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-4xl font-bold text-foreground mb-2">
-            Control de Entradas
+            Control de Entradas - Santas
           </h1>
           <p className="text-muted-foreground">
             Gestión en tiempo real de ventas por evento
           </p>
         </div>
-        <LocationSelector
-          selectedLocation={selectedLocation}
-          onLocationChange={setSelectedLocation}
-        />
       </div>
 
       {/* SELECCIÓN DE EVENTO */}
@@ -175,13 +142,11 @@ export default function Entradas() {
             <SelectValue placeholder="Seleccionar evento" />
           </SelectTrigger>
           <SelectContent>
-            {events
-              .filter((e) => e.location === selectedLocation)
-              .map((event) => (
-                <SelectItem key={event.id} value={event.id}>
-                  {event.name}
-                </SelectItem>
-              ))}
+            {events.map((event) => (
+              <SelectItem key={event.id} value={event.id}>
+                {event.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -259,7 +224,7 @@ export default function Entradas() {
         </div>
       )}
 
-      {/* RECUADROS RESUMEN (abajo de los contadores) */}
+      {/* RECUADROS RESUMEN */}
       {selectedEvent && (
         <div className="grid gap-4 md:grid-cols-3 mt-8">
           <ResumenBox
@@ -300,9 +265,6 @@ export default function Entradas() {
           <div className="space-y-3 mt-4">
             <p className="text-muted-foreground">
               <strong>Evento:</strong> {selectedEventData?.name}
-            </p>
-            <p className="text-muted-foreground">
-              <strong>Ubicación:</strong> {selectedLocation}
             </p>
             <p className="text-muted-foreground">
               <strong>Entradas Reservadas:</strong>{" "}
