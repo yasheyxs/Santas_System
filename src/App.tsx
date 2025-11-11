@@ -7,7 +7,7 @@ import { Layout } from "@/components/Layout";
 import Index from "./pages/Index";
 import Entradas from "./pages/Entradas";
 import Eventos from "./pages/Eventos";
-import Promotores from "./pages/Promotores";
+import Listas from "./pages/Listas";
 import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
 import Usuarios from "./pages/Usuarios";
@@ -26,7 +26,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/entradas" element={<Entradas />} />
             <Route path="/eventos" element={<Eventos />} />
-            <Route path="/promotores" element={<Promotores />} />
+            <Route path="/listas" element={<Listas />} />
             <Route path="/usuarios" element={<Usuarios />} />
             <Route path="/reportes" element={<Reportes />} />
             <Route path="/configuracion" element={<Configuracion />} />

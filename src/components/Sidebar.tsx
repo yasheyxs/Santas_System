@@ -16,7 +16,7 @@ const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Entradas", href: "/entradas", icon: Ticket },
   { name: "Eventos", href: "/eventos", icon: Calendar },
-  { name: "Promotores", href: "/promotores", icon: Users },
+  { name: "Listas", href: "/listas", icon: Users },
   { name: "Usuarios", href: "/usuarios", icon: UserPlus },
   { name: "Reportes", href: "/reportes", icon: BarChart3 },
   { name: "Configuración entradas", href: "/configuracion", icon: Settings },
