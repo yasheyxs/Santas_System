@@ -1,12 +1,9 @@
 import {
   LayoutDashboard,
   Ticket,
-  Package,
   Calendar,
   Users,
-  BarChart3,
   Settings,
-  ShoppingCart,
   UserPlus,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
@@ -18,7 +15,6 @@ const navigation = [
   { name: "Eventos", href: "/eventos", icon: Calendar },
   { name: "Listas", href: "/listas", icon: Users },
   { name: "Usuarios", href: "/usuarios", icon: UserPlus },
-  { name: "Reportes", href: "/reportes", icon: BarChart3 },
   { name: "Configuración entradas", href: "/configuracion", icon: Settings },
 ];
 

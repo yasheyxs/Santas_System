@@ -1,12 +1,11 @@
-import { 
-  LayoutDashboard, 
-  Users, 
-  Calendar, 
-  ShoppingCart, 
-  Package, 
+import {
+  LayoutDashboard,
+  Users,
+  Calendar,
+  ShoppingCart,
+  Package,
   UserCog,
   TrendingUp,
-  FileText
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -32,7 +31,6 @@ const menuItems = [
   { title: "Inventario", url: "/inventario", icon: Package },
   { title: "Personal", url: "/personal", icon: UserCog },
   { title: "Marketing", url: "/marketing", icon: TrendingUp },
-  { title: "Reportes", url: "/reportes", icon: FileText },
 ];
 
 export function AppSidebar() {

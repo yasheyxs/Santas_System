@@ -8,7 +8,6 @@ import Index from "./pages/Index";
 import Entradas from "./pages/Entradas";
 import Eventos from "./pages/Eventos";
 import Listas from "./pages/Listas";
-import Reportes from "./pages/Reportes";
 import Configuracion from "./pages/Configuracion";
 import Usuarios from "./pages/Usuarios";
 import NotFound from "./pages/NotFound";
@@ -28,7 +27,6 @@ const App = () => (
             <Route path="/eventos" element={<Eventos />} />
             <Route path="/listas" element={<Listas />} />
             <Route path="/usuarios" element={<Usuarios />} />
-            <Route path="/reportes" element={<Reportes />} />
             <Route path="/configuracion" element={<Configuracion />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
