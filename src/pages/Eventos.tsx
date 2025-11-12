@@ -187,7 +187,9 @@ export default function Eventos() {
         setForm({ nombre: "", detalle: "", fecha: iso, capacidad: "" });
         toast({
           title: "Nueva fecha",
-          description: `Creá un evento para el ${date.toLocaleDateString("es-AR")}`,
+          description: `Creá un evento para el ${date.toLocaleDateString(
+            "es-AR"
+          )}`,
         });
       }
       setOpen(true);
