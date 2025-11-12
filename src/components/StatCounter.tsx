@@ -9,9 +9,13 @@ interface StatCounterProps {
   count: number;
   variant?: "default" | "primary" | "accent" | "success";
   maxCount?: number;
+  priceLabel?: string;
   actionLabel?: string;
   onAction?: () => void;
   disabled?: boolean;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+  secondaryDisabled?: boolean;
 }
 
 export function StatCounter({
@@ -20,9 +24,13 @@ export function StatCounter({
   count,
   variant = "default",
   maxCount,
+  priceLabel,
   actionLabel,
   onAction,
   disabled = false,
+  secondaryActionLabel,
+  onSecondaryAction,
+  secondaryDisabled = false,
 }: StatCounterProps) {
   const variantStyles = {
     default: "border-border",
@@ -78,6 +86,13 @@ export function StatCounter({
           )}
         </div>
 
+        {priceLabel && (
+          <div className="text-center text-sm text-muted-foreground">
+            Precio base:{" "}
+            <span className="font-semibold text-foreground">{priceLabel}</span>
+          </div>
+        )}
+
         {actionLabel && (
           <Button
             onClick={onAction}
@@ -86,6 +101,17 @@ export function StatCounter({
             disabled={disabled}
           >
             {actionLabel}
+          </Button>
+        )}
+        {secondaryActionLabel && (
+          <Button
+            onClick={onSecondaryAction}
+            size="sm"
+            variant="outline"
+            className="w-full"
+            disabled={secondaryDisabled}
+          >
+            {secondaryActionLabel}
           </Button>
         )}
       </CardContent>
