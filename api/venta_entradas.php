@@ -22,6 +22,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
+    // Asegurar columnas necesarias
     $pdo->exec("ALTER TABLE IF EXISTS public.ventas_entradas ADD COLUMN IF NOT EXISTS evento_id integer");
     $pdo->exec("ALTER TABLE IF EXISTS public.ventas_entradas ADD COLUMN IF NOT EXISTS incluye_trago boolean DEFAULT false");
 
@@ -32,36 +33,10 @@ try {
         $entradasStmt = $pdo->query("SELECT id, nombre, descripcion, precio_base FROM entradas WHERE activo = true ORDER BY nombre ASC");
         $ventasStmt = $pdo->query("SELECT evento_id, entrada_id, COALESCE(SUM(cantidad), 0) AS total_vendido FROM ventas_entradas GROUP BY evento_id, entrada_id");
 
-        $eventos = array_map(function ($evento) {
-            return [
-                'id' => (int)$evento['id'],
-                'nombre' => $evento['nombre'],
-                'fecha' => $evento['fecha'],
-                'capacidad' => isset($evento['capacidad']) ? (int)$evento['capacidad'] : null,
-            ];
-        }, $eventosStmt->fetchAll() ?: []);
-
-        $entradas = array_map(function ($entrada) {
-            return [
-                'id' => (int)$entrada['id'],
-                'nombre' => $entrada['nombre'],
-                'descripcion' => $entrada['descripcion'],
-                'precio_base' => isset($entrada['precio_base']) ? (float)$entrada['precio_base'] : 0,
-            ];
-        }, $entradasStmt->fetchAll() ?: []);
-
-        $ventas = array_map(function ($venta) {
-            return [
-                'evento_id' => $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
-                'entrada_id' => (int)$venta['entrada_id'],
-                'total_vendido' => isset($venta['total_vendido']) ? (int)$venta['total_vendido'] : 0,
-            ];
-        }, $ventasStmt->fetchAll() ?: []);
-
         echo json_encode([
-            'eventos' => $eventos,
-            'entradas' => $entradas,
-            'ventas' => $ventas,
+            'eventos' => $eventosStmt->fetchAll(),
+            'entradas' => $entradasStmt->fetchAll(),
+            'ventas' => $ventasStmt->fetchAll()
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -69,7 +44,108 @@ try {
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
 
-        if (!$input || !isset($input['entrada_id']) || !isset($input['cantidad'])) {
+        if (!$input || !isset($input['accion'])) {
+            http_response_code(400);
+            echo json_encode(['error' => 'El campo accion es obligatorio.']);
+            exit;
+        }
+
+        $accion = $input['accion'];
+
+        // Cierre de evento
+        if ($accion === 'cerrar_evento') {
+            if (!isset($input['evento_id'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'El campo evento_id es obligatorio para cerrar el evento.']);
+                exit;
+            }
+
+            $eventoId = (int)$input['evento_id'];
+            $eventoStmt = $pdo->prepare("SELECT id, nombre, capacidad FROM eventos WHERE id = :id");
+            $eventoStmt->execute([':id' => $eventoId]);
+            $evento = $eventoStmt->fetch();
+
+            if (!$evento) {
+                http_response_code(404);
+                echo json_encode(['error' => 'Evento no encontrado.']);
+                exit;
+            }
+
+            $detalleStmt = $pdo->prepare("
+                SELECT e.id AS entrada_id, e.nombre,
+                       COALESCE(SUM(v.cantidad), 0) AS cantidad,
+                       COALESCE(SUM(v.total), 0) AS total
+                FROM ventas_entradas v
+                JOIN entradas e ON e.id = v.entrada_id
+                WHERE v.evento_id = :evento_id
+                GROUP BY e.id, e.nombre
+            ");
+            $detalleStmt->execute([':evento_id' => $eventoId]);
+            $detalle = $detalleStmt->fetchAll() ?: [];
+
+            $totalEntradas = 0;
+            $totalMonto = 0;
+            foreach ($detalle as $item) {
+                $totalEntradas += (int)$item['cantidad'];
+                $totalMonto += (float)$item['total'];
+            }
+
+            $capacidad = isset($evento['capacidad']) ? (int)$evento['capacidad'] : null;
+            $porcentaje = ($capacidad && $capacidad > 0)
+                ? round(($totalEntradas / $capacidad) * 100, 2)
+                : null;
+
+            $pdo->exec("CREATE TABLE IF NOT EXISTS public.cierres_eventos (
+                id SERIAL PRIMARY KEY,
+                evento_id INTEGER,
+                evento_nombre TEXT,
+                total_vendido INTEGER DEFAULT 0,
+                total_monto NUMERIC(12,2) DEFAULT 0,
+                capacidad INTEGER,
+                porcentaje NUMERIC(6,2),
+                detalle JSONB,
+                fecha_cierre TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+            )");
+
+            $insertCierre = $pdo->prepare("
+                INSERT INTO cierres_eventos (evento_id, evento_nombre, total_vendido, total_monto, capacidad, porcentaje, detalle)
+                VALUES (:evento_id, :evento_nombre, :total_vendido, :total_monto, :capacidad, :porcentaje, :detalle)
+                RETURNING id, fecha_cierre
+            ");
+            $insertCierre->execute([
+                ':evento_id' => $eventoId,
+                ':evento_nombre' => $evento['nombre'],
+                ':total_vendido' => $totalEntradas,
+                ':total_monto' => $totalMonto,
+                ':capacidad' => $capacidad,
+                ':porcentaje' => $porcentaje,
+                ':detalle' => json_encode($detalle, JSON_UNESCAPED_UNICODE)
+            ]);
+
+            $cierre = $insertCierre->fetch();
+
+            $pdo->prepare("DELETE FROM ventas_entradas WHERE evento_id = :evento_id")
+                ->execute([':evento_id' => $eventoId]);
+
+            echo json_encode([
+                'mensaje' => 'Evento cerrado correctamente.',
+                'cierre' => [
+                    'id' => (int)$cierre['id'],
+                    'evento_id' => $eventoId,
+                    'evento_nombre' => $evento['nombre'],
+                    'total_vendido' => $totalEntradas,
+                    'total_monto' => $totalMonto,
+                    'capacidad' => $capacidad,
+                    'porcentaje' => $porcentaje,
+                    'detalle' => $detalle,
+                    'fecha_cierre' => $cierre['fecha_cierre']
+                ]
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        // Registro o resta de venta
+        if (!isset($input['entrada_id']) || !isset($input['cantidad'])) {
             http_response_code(400);
             echo json_encode(['error' => 'Los campos entrada_id y cantidad son obligatorios.']);
             exit;
@@ -77,9 +153,34 @@ try {
 
         $entradaId = (int)$input['entrada_id'];
         $cantidad = (int)$input['cantidad'];
-        $cantidad = $cantidad > 0 ? $cantidad : 1;
         $eventoId = isset($input['evento_id']) ? (int)$input['evento_id'] : null;
-        $incluyeTrago = isset($input['incluye_trago']) ? (bool)$input['incluye_trago'] : false;
+        // Normalizar valor booleano sin riesgo de enviar string vacía
+        $valor = $input['incluye_trago'] ?? false;
+
+        // Si es string vacía o null -> false
+        if ($valor === '' || $valor === null) {
+            $incluyeTrago = false;
+        }
+        // Si viene como texto "true"/"1"/"on"/"yes" -> true
+        elseif (is_string($valor)) {
+            $incluyeTrago = in_array(strtolower(trim($valor)), ['true', '1', 'on', 'yes'], true);
+        }
+        // Si viene como número 1/0 -> convertir a bool
+        elseif (is_numeric($valor)) {
+            $incluyeTrago = ((int)$valor) === 1;
+        }
+        // Si ya viene boolean -> dejarlo
+        else {
+            $incluyeTrago = (bool)$valor;
+        }
+
+        // ✅ Cast explícito a boolean real para evitar '' en PDO
+        $incluyeTrago = $incluyeTrago ? true : false;
+
+
+
+        if ($accion === 'restar') $cantidad = -abs($cantidad);
+        else $cantidad = abs($cantidad);
 
         // Obtener precio base de la entrada
         $entradaStmt = $pdo->prepare("SELECT precio_base FROM entradas WHERE id = :id AND activo = true");
@@ -93,24 +194,25 @@ try {
         }
 
         $precioUnitario = (float)$entrada['precio_base'];
-        $total = $cantidad * $precioUnitario;
 
-        // 🔧 Inserta la venta sin incluir total, ya que es una columna generada
+        // Insertar venta
         $insert = $pdo->prepare("
     INSERT INTO ventas_entradas (entrada_id, evento_id, cantidad, precio_unitario, incluye_trago)
-    VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, :incluye_trago)
-    RETURNING id, entrada_id, evento_id, cantidad, precio_unitario, incluye_trago, total, fecha_venta
+    VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, CAST(:incluye_trago AS boolean))
+    RETURNING id, entrada_id, evento_id, cantidad, precio_unitario, incluye_trago, fecha_venta
 ");
 
-        $insert->execute([
-            ':entrada_id' => $entradaId,
-            ':evento_id' => $eventoId,
-            ':cantidad' => $cantidad,
-            ':precio_unitario' => $precioUnitario,
-            ':incluye_trago' => $incluyeTrago
-        ]);
+        $insert->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
+        $insert->bindValue(':evento_id', $eventoId, PDO::PARAM_INT);
+        $insert->bindValue(':cantidad', $cantidad, PDO::PARAM_INT);
+        $insert->bindValue(':precio_unitario', $precioUnitario);
+        $insert->bindValue(':incluye_trago', $incluyeTrago ? 'true' : 'false', PDO::PARAM_STR);
+        $insert->execute();
+
+
 
         $venta = $insert->fetch();
+        $venta['total'] = (float)$venta['precio_unitario'] * (int)$venta['cantidad'];
 
         echo json_encode([
             'id' => (int)$venta['id'],
@@ -122,14 +224,16 @@ try {
             'fecha_venta' => $venta['fecha_venta'],
             'total' => (float)$venta['total']
         ], JSON_UNESCAPED_UNICODE);
-
         exit;
     }
 
-
+    // Si el método no es GET ni POST
     http_response_code(405);
     echo json_encode(['error' => 'Método no permitido.']);
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode([
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
+    ]);
 }

@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Calendar, CheckCircle, Loader2, Printer, Ticket } from "lucide-react";
+import {
+  Calendar,
+  CheckCircle,
+  Loader2,
+  MinusCircle,
+  Printer,
+  Ticket,
+} from "lucide-react";
 import { StatCounter } from "@/components/StatCounter";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,6 +84,10 @@ export default function Entradas() {
   const [cantidadVenta, setCantidadVenta] = useState<number>(1);
   const [incluyeTrago, setIncluyeTrago] = useState<boolean>(false);
   const [registrandoVenta, setRegistrandoVenta] = useState<boolean>(false);
+  const [tipoOperacion, setTipoOperacion] = useState<"venta" | "resta">(
+    "venta"
+  );
+  const [closingEvent, setClosingEvent] = useState<boolean>(false);
 
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }),
@@ -162,6 +173,12 @@ export default function Entradas() {
   );
 
   const maxCapacity = selectedEventData?.capacity ?? 0;
+  const capacidadPorcentaje =
+    maxCapacity > 0 ? Math.round((totalEntradas / maxCapacity) * 100) : null;
+  const totalRecaudado = entradas.reduce((acc, entrada) => {
+    const cantidad = currentSales[entrada.id] ?? 0;
+    return acc + cantidad * entrada.precio_base;
+  }, 0);
   const variants: StatCounterVariant[] = ["primary", "accent", "success"];
 
   const handleCloseEvent = () => {
@@ -176,12 +193,45 @@ export default function Entradas() {
   };
 
   const handleConfirmClose = () => {
-    console.log("Evento cerrado:", {
-      evento: selectedEventData?.name,
-      resumen: currentSales,
-      total: totalEntradas,
-    });
-    setShowSummary(false);
+    if (!selectedEvent || !selectedEventData) {
+      toast({
+        title: "Seleccioná un evento",
+        description: "Debes elegir un evento antes de cerrarlo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setClosingEvent(true);
+
+    api
+      .post("/venta_entradas.php", {
+        accion: "cerrar_evento",
+        evento_id: Number(selectedEvent),
+      })
+      .then(() => {
+        toast({
+          title: "Evento cerrado",
+          description: "Se guardó el resumen y se reiniciaron los contadores.",
+        });
+        setVentasPorEvento((prev) => {
+          const updated = { ...prev };
+          updated[selectedEvent] = {};
+          return updated;
+        });
+        setShowSummary(false);
+      })
+      .catch((error) => {
+        console.error("Error al cerrar evento:", error);
+        toast({
+          title: "No se pudo cerrar el evento",
+          description: "Reintentá en unos segundos.",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setClosingEvent(false);
+      });
   };
 
   const abrirVenta = (entradaId: number) => {
@@ -197,12 +247,40 @@ export default function Entradas() {
     setSellingEntradaId(entradaId);
     setCantidadVenta(1);
     setIncluyeTrago(false);
+    setTipoOperacion("venta");
+  };
+
+  const abrirResta = (entradaId: number) => {
+    if (!selectedEvent) {
+      toast({
+        title: "Seleccioná un evento",
+        description: "Debes elegir un evento antes de ajustar una venta.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const disponibles = currentSales[entradaId] ?? 0;
+
+    if (disponibles <= 0) {
+      toast({
+        title: "Sin entradas registradas",
+        description: "No hay ventas para restar en este tipo de entrada.",
+      });
+      return;
+    }
+
+    setSellingEntradaId(entradaId);
+    setCantidadVenta(1);
+    setIncluyeTrago(false);
+    setTipoOperacion("resta");
   };
 
   const cerrarVenta = () => {
     setSellingEntradaId(null);
     setCantidadVenta(1);
     setIncluyeTrago(false);
+    setTipoOperacion("venta");
   };
 
   const registrarVenta = async () => {
@@ -235,14 +313,25 @@ export default function Entradas() {
       return;
     }
 
+    const disponibles = currentSales[sellingEntradaId] ?? 0;
+    if (tipoOperacion === "resta" && cantidadVenta > disponibles) {
+      toast({
+        title: "Cantidad inválida",
+        description: "No podés restar más entradas de las registradas.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setRegistrandoVenta(true);
 
     try {
       const payload = {
+        accion: tipoOperacion === "resta" ? "restar" : "registrar",
         evento_id: Number(selectedEvent),
         entrada_id: sellingEntradaId,
         cantidad: cantidadVenta,
-        incluye_trago: incluyeTrago,
+        incluye_trago: tipoOperacion === "venta" ? incluyeTrago : false,
       };
 
       const { data } = await api.post("/venta_entradas.php", payload);
@@ -251,25 +340,42 @@ export default function Entradas() {
           ? String(data.evento_id)
           : String(selectedEvent);
       const entradaKey = data?.entrada_id ?? sellingEntradaId;
-      const cantidadRegistrada = data?.cantidad ?? cantidadVenta;
+      const cantidadRegistrada =
+        typeof data?.cantidad === "number"
+          ? Number(data.cantidad)
+          : tipoOperacion === "resta"
+          ? -cantidadVenta
+          : cantidadVenta;
 
       setVentasPorEvento((prev) => {
         const previousEventSales = prev[eventKey] ?? {};
+        const updatedEventSales = { ...previousEventSales };
+        const nuevoTotal = Math.max(
+          (previousEventSales[entradaKey] ?? 0) + cantidadRegistrada,
+          0
+        );
+
+        if (nuevoTotal > 0) {
+          updatedEventSales[entradaKey] = nuevoTotal;
+        } else {
+          delete updatedEventSales[entradaKey];
+        }
         return {
           ...prev,
-          [eventKey]: {
-            ...previousEventSales,
-            [entradaKey]:
-              (previousEventSales[entradaKey] ?? 0) + cantidadRegistrada,
-          },
+          [eventKey]: updatedEventSales,
         };
       });
 
+      const cantidadAbsoluta = Math.abs(cantidadRegistrada);
+
       toast({
-        title: "Venta registrada",
-        description: `${cantidadRegistrada} ${
-          cantidadRegistrada === 1 ? "entrada" : "entradas"
-        } de ${entrada.nombre} registradas correctamente.`,
+        title:
+          tipoOperacion === "resta" ? "Ajuste registrado" : "Venta registrada",
+        description: `${cantidadAbsoluta} ${
+          cantidadAbsoluta === 1 ? "entrada" : "entradas"
+        } de ${entrada.nombre} ${
+          tipoOperacion === "resta" ? "restadas" : "registradas"
+        } correctamente.`,
       });
 
       cerrarVenta();
@@ -289,6 +395,11 @@ export default function Entradas() {
   const entradaSeleccionada = entradas.find(
     (item) => item.id === sellingEntradaId
   );
+  const maxRestante =
+    sellingEntradaId !== null ? currentSales[sellingEntradaId] ?? 0 : 0;
+  const totalOperacion = entradaSeleccionada
+    ? entradaSeleccionada.precio_base * cantidadVenta
+    : 0;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -349,6 +460,14 @@ export default function Entradas() {
               <p className="text-2xl font-semibold text-foreground">
                 {maxCapacity > 0 ? numberFormatter.format(maxCapacity) : "—"}
               </p>
+              {capacidadPorcentaje !== null && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  Ocupación:{" "}
+                  <span className="font-semibold text-foreground">
+                    {capacidadPorcentaje}%
+                  </span>
+                </p>
+              )}
               <div className="mt-2">
                 <div className="w-full md:w-48 h-3 bg-muted rounded-full overflow-hidden">
                   <div
@@ -356,13 +475,19 @@ export default function Entradas() {
                     style={{
                       width: maxCapacity
                         ? `${Math.min(
-                            (totalEntradas / maxCapacity) * 100,
+                            Math.max(capacidadPorcentaje ?? 0, 0),
                             100
                           )}%`
                         : "0%",
                     }}
                   />
                 </div>
+              </div>
+              <div className="mt-3 text-sm text-muted-foreground">
+                Total recaudado:{" "}
+                <span className="font-semibold text-foreground">
+                  {currencyFormatter.format(totalRecaudado)}
+                </span>
               </div>
             </div>
           </div>
@@ -379,14 +504,15 @@ export default function Entradas() {
             <StatCounter
               key={entrada.id}
               title={entrada.nombre}
-              subtitle={
-                entrada.descripcion ||
-                `Precio base: ${currencyFormatter.format(entrada.precio_base)}`
-              }
+              subtitle={entrada.descripcion ?? undefined}
               count={currentSales[entrada.id] ?? 0}
               variant={variants[index % variants.length]}
               actionLabel="Vender entrada"
               onAction={() => abrirVenta(entrada.id)}
+              priceLabel={currencyFormatter.format(entrada.precio_base)}
+              secondaryActionLabel="Restar entradas"
+              onSecondaryAction={() => abrirResta(entrada.id)}
+              secondaryDisabled={(currentSales[entrada.id] ?? 0) === 0}
             />
           ))}
         </div>
@@ -397,7 +523,7 @@ export default function Entradas() {
           <Button
             onClick={handleCloseEvent}
             disabled={!selectedEvent}
-            className="px-12 py-6 bg-foreground text-background text-lg font-semibold hover:bg-foreground/90"
+            className="px-12 py-6 bg-[#0f5132] text-white text-lg font-semibold hover:bg-[#0c452a]"
           >
             <CheckCircle className="mr-2 h-5 w-5" />
             Cerrar Evento
@@ -419,18 +545,43 @@ export default function Entradas() {
               <strong>Total vendidas:</strong>{" "}
               {numberFormatter.format(totalEntradas)}
             </p>
+            <p>
+              <strong>Total recaudado:</strong>{" "}
+              {currencyFormatter.format(totalRecaudado)}
+            </p>
+            {capacidadPorcentaje !== null && (
+              <p>
+                <strong>Ocupación:</strong> {capacidadPorcentaje}%
+              </p>
+            )}
             <div className="pt-2 space-y-1">
               <p className="font-semibold text-foreground">
                 Detalle por entrada:
               </p>
-              {entradas.map((entrada) => (
-                <div key={entrada.id} className="flex justify-between">
-                  <span>{entrada.nombre}</span>
-                  <span>
-                    {numberFormatter.format(currentSales[entrada.id] ?? 0)}
-                  </span>
-                </div>
-              ))}
+              {entradas.map((entrada) => {
+                const cantidad = currentSales[entrada.id] ?? 0;
+                if (!cantidad) {
+                  return null;
+                }
+                const totalEntrada = cantidad * entrada.precio_base;
+                return (
+                  <div
+                    key={entrada.id}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{entrada.nombre}</span>
+                    <div className="text-right">
+                      <span className="block">
+                        {numberFormatter.format(cantidad)}{" "}
+                        {cantidad === 1 ? "entrada" : "entradas"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {currencyFormatter.format(totalEntrada)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -440,9 +591,16 @@ export default function Entradas() {
             </Button>
             <Button
               onClick={handleConfirmClose}
-              className="bg-primary text-white"
+              className="bg-[#0f5132] text-white hover:bg-[#0c452a]"
+              disabled={closingEvent}
             >
-              Confirmar Cierre
+              {closingEvent ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Guardando...
+                </>
+              ) : (
+                "Confirmar Cierre"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -458,7 +616,11 @@ export default function Entradas() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Registrar venta</DialogTitle>
+            <DialogTitle>
+              {tipoOperacion === "resta"
+                ? "Restar entradas"
+                : "Registrar venta"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div>
@@ -484,29 +646,63 @@ export default function Entradas() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="cantidad">Cantidad</Label>
+              <Label htmlFor="cantidad">
+                Cantidad {tipoOperacion === "resta" ? "a restar" : "a vender"}
+              </Label>
               <Input
                 id="cantidad"
                 type="number"
                 min={1}
+                max={
+                  tipoOperacion === "resta"
+                    ? Math.max(maxRestante, 1)
+                    : undefined
+                }
                 value={cantidadVenta}
                 onChange={(event) => {
                   const value = Number(event.target.value);
                   if (Number.isNaN(value)) {
                     setCantidadVenta(1);
                   } else {
-                    setCantidadVenta(value <= 0 ? 1 : Math.floor(value));
+                    const baseValue = value <= 0 ? 1 : Math.floor(value);
+                    if (tipoOperacion === "resta") {
+                      const limite = Math.max(maxRestante, 1);
+                      setCantidadVenta(
+                        limite > 0 ? Math.min(baseValue, limite) : 1
+                      );
+                    } else {
+                      setCantidadVenta(baseValue);
+                    }
                   }
                 }}
               />
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="incluye-trago"
-                checked={incluyeTrago}
-                onCheckedChange={(checked) => setIncluyeTrago(Boolean(checked))}
-              />
-              <Label htmlFor="incluye-trago">Incluye trago gratis</Label>
+            {tipoOperacion === "resta" && (
+              <p className="text-xs text-muted-foreground">
+                Disponibles para restar: {numberFormatter.format(maxRestante)}
+              </p>
+            )}
+            {tipoOperacion === "venta" && (
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="incluye-trago"
+                  checked={incluyeTrago}
+                  onCheckedChange={(checked) =>
+                    setIncluyeTrago(Boolean(checked))
+                  }
+                />
+                <Label htmlFor="incluye-trago">Incluye trago gratis</Label>
+              </div>
+            )}
+            <div className="rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+              <p className="font-semibold text-foreground">
+                Total {tipoOperacion === "resta" ? "a descontar" : "a cobrar"}:{" "}
+                <span className="ml-1">
+                  {currencyFormatter.format(
+                    tipoOperacion === "resta" ? -totalOperacion : totalOperacion
+                  )}
+                </span>
+              </p>
             </div>
           </div>
 
@@ -518,7 +714,13 @@ export default function Entradas() {
             >
               Cancelar
             </Button>
-            <Button onClick={registrarVenta} disabled={registrandoVenta}>
+            <Button
+              onClick={registrarVenta}
+              disabled={
+                registrandoVenta ||
+                (tipoOperacion === "resta" && maxRestante <= 0)
+              }
+            >
               {registrandoVenta ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />{" "}
@@ -526,7 +728,15 @@ export default function Entradas() {
                 </>
               ) : (
                 <>
-                  <Printer className="h-4 w-4 mr-2" /> Imprimir
+                  {tipoOperacion === "resta" ? (
+                    <>
+                      <MinusCircle className="h-4 w-4 mr-2" /> Restar
+                    </>
+                  ) : (
+                    <>
+                      <Printer className="h-4 w-4 mr-2" /> Imprimir
+                    </>
+                  )}
                 </>
               )}
             </Button>
