@@ -11,6 +11,10 @@ import Listas from "./pages/Listas";
 import Configuracion from "./pages/Configuracion";
 import Usuarios from "./pages/Usuarios";
 import NotFound from "./pages/NotFound";
+import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AuthProvider } from "@/context/AuthContext";
 
 const queryClient = new QueryClient();
 
@@ -19,20 +23,25 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <Layout>
+      <AuthProvider>
+        <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/entradas" element={<Entradas />} />
-            <Route path="/eventos" element={<Eventos />} />
-            <Route path="/listas" element={<Listas />} />
-            <Route path="/usuarios" element={<Usuarios />} />
-            <Route path="/configuracion" element={<Configuracion />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-            <Route path="*" element={<NotFound />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/recuperar" element={<ForgotPassword />} />
+            <Route element={<ProtectedRoute />}>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Index />} />
+                <Route path="/entradas" element={<Entradas />} />
+                <Route path="/eventos" element={<Eventos />} />
+                <Route path="/listas" element={<Listas />} />
+                <Route path="/usuarios" element={<Usuarios />} />
+                <Route path="/configuracion" element={<Configuracion />} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
+            </Route>
           </Routes>
-        </Layout>
-      </BrowserRouter>
+        </BrowserRouter>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
