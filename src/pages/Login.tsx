@@ -55,14 +55,7 @@ const Login = () => {
     <AuthLayout
       title="Iniciar sesión"
       subtitle="Administrá Santas Club con seguridad"
-      footer={
-        <p className="text-center text-sm text-muted-foreground">
-          ¿No tenés una cuenta?{" "}
-          <Link to="/registro" className="text-primary hover:underline">
-            Registrate aquí
-          </Link>
-        </p>
-      }
+      footer={null} // 👈 SIN REGISTRO
     >
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="space-y-2">
