@@ -226,14 +226,34 @@ try {
 
     // === 1. Métricas del mes ===
     $metricsSql = "
+    WITH event_stats AS (
+            SELECT
+                e.id,
+                e.fecha,
+                e.capacidad,
+                COALESCE(SUM(ve.cantidad), 0) AS entradas,
+                COALESCE(SUM(ve.total), 0) AS total
+            FROM eventos e
+            LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+            WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
+            GROUP BY e.id, e.fecha, e.capacidad
+        ),
+        daily_stats AS (
+            SELECT
+                DATE(fecha) AS dia,
+                CASE
+                    WHEN SUM(capacidad) > 0 THEN (SUM(entradas) * 100.0) / SUM(capacidad)
+                    ELSE NULL
+                END AS ocupacion
+            FROM event_stats
+            GROUP BY DATE(fecha)
+        )
         SELECT
-            COUNT(DISTINCT e.id) AS eventos_mes,
-            COALESCE(SUM(ve.cantidad), 0) AS entradas_mes,
-            COALESCE(SUM(ve.total), 0) AS recaudacion_mes,
-            ROUND(AVG((COALESCE(ve.cantidad,0)*100.0)/NULLIF(e.capacidad,0))) AS ocupacion_promedio
-        FROM eventos e
-        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
-        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
+            COUNT(*) AS eventos_mes,
+            COALESCE(SUM(entradas), 0) AS entradas_mes,
+            COALESCE(SUM(total), 0) AS recaudacion_mes,
+            (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
+        FROM event_stats
     ";
     $st = $pdo->prepare($metricsSql);
     $st->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
@@ -383,14 +403,34 @@ try {
 
     // === 5. Resumen mensual ===
     $monthlySql = "
+    WITH event_stats AS (
+            SELECT
+                e.id,
+                e.fecha,
+                e.capacidad,
+                COALESCE(SUM(ve.cantidad), 0) AS entradas,
+                COALESCE(SUM(ve.total), 0) AS total
+            FROM eventos e
+            LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+            WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
+            GROUP BY e.id, e.fecha, e.capacidad
+        ),
+        daily_stats AS (
+            SELECT
+                DATE(fecha) AS dia,
+                CASE
+                    WHEN SUM(capacidad) > 0 THEN (SUM(entradas) * 100.0) / SUM(capacidad)
+                    ELSE NULL
+                END AS ocupacion
+            FROM event_stats
+            GROUP BY DATE(fecha)
+        )
         SELECT TO_CHAR(:mstart::date, 'TMMonth YYYY') AS month_label,
-               COUNT(DISTINCT e.id) AS total_eventos,
-               COALESCE(SUM(ve.cantidad),0) AS total_entradas,
-               COALESCE(SUM(ve.total),0) AS recaudacion,
-               ROUND(AVG((COALESCE(ve.cantidad,0)*100.0)/NULLIF(e.capacidad,0))) AS ocupacion_promedio
-        FROM eventos e
-        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
-        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
+               COUNT(*) AS total_eventos,
+               COALESCE(SUM(entradas),0) AS total_entradas,
+               COALESCE(SUM(total),0) AS recaudacion,
+               (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
+        FROM event_stats
     ";
     $ms = $pdo->prepare($monthlySql);
     $ms->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);

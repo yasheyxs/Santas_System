@@ -62,9 +62,21 @@ All colors MUST be HSL.
     --sidebar-ring: 270 80% 60%;
 
     /* Custom gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(270, 80%, 60%), hsl(280, 70%, 50%));
-    --gradient-accent: linear-gradient(135deg, hsl(45, 100%, 60%), hsl(35, 100%, 55%));
-    --gradient-dark: linear-gradient(180deg, hsl(240, 10%, 8%), hsl(240, 12%, 6%));
+    --gradient-primary: linear-gradient(
+      135deg,
+      hsl(270, 80%, 60%),
+      hsl(280, 70%, 50%)
+    );
+    --gradient-accent: linear-gradient(
+      135deg,
+      hsl(45, 100%, 60%),
+      hsl(35, 100%, 55%)
+    );
+    --gradient-dark: linear-gradient(
+      180deg,
+      hsl(240, 10%, 8%),
+      hsl(240, 12%, 6%)
+    );
 
     /* Glow effects */
     --glow-primary: 0 0 20px hsl(270, 80%, 60% / 0.5);
@@ -83,5 +95,11 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+  }
+
+  input[typse="date"]::-webkit-calendar-picker-indicator,
+  input[type="date"]::-moz-calendar-picker-indicator {
+    filter: invert(0.9) sepia(0.3) saturate(5) hue-rotate(260deg);
+    opacity: 1;
   }
 }
