@@ -38,11 +38,21 @@ const TOKEN_STORAGE_KEY = "santas:token";
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem(USER_STORAGE_KEY);
-    return stored ? (JSON.parse(stored) as AuthUser) : null;
+    if (stored) {
+      try {
+        return JSON.parse(stored) as AuthUser;
+      } catch (error) {
+        console.error("Error parsing user data from localStorage", error);
+        return null; // Si ocurre un error en el parseo, retornamos null
+      }
+    }
+    return null; // Si no hay datos en localStorage, retornamos null
   });
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem(TOKEN_STORAGE_KEY)
-  );
+
+  const [token, setToken] = useState<string | null>(() => {
+    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    return storedToken || null;
+  });
 
   const login = useCallback(async (telefono: string, password: string) => {
     const response = await fetch(`${API_BASE_URL}/login.php`, {
@@ -53,7 +63,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const data = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || !data.user || !data.token) {
       throw new Error(data?.error ?? "No se pudo iniciar sesión");
     }
 

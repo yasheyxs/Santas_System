@@ -31,12 +31,20 @@ const Login = () => {
       return;
     }
 
+    // Validar formato de teléfono (Ejemplo: al menos 10 dígitos)
+    const phonePattern = /^[0-9]{10,}$/;
+    if (!phonePattern.test(telefono)) {
+      toast.error("Por favor ingresa un teléfono válido");
+      return;
+    }
+
     setLoading(true);
     try {
       await login(telefono, password);
       toast.success("Sesión iniciada correctamente");
       navigate(from, { replace: true });
     } catch (error) {
+      // Asegúrate de capturar un error si es una cadena o cualquier tipo
       const message =
         error instanceof Error ? error.message : "No se pudo iniciar sesión";
       toast.error(message);
@@ -72,6 +80,7 @@ const Login = () => {
               placeholder="351 555 4444"
               value={telefono}
               onChange={(event) => setTelefono(event.target.value)}
+              pattern="^[0-9]{10,}$" // Validación de 10 dígitos mínimo
             />
           </div>
         </div>
