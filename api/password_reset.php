@@ -4,39 +4,49 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // --- CORS ---
-header("Access-Control-Allow-Origin: http://localhost:8080");
-header("Access-Control-Allow-Credentials: true");
+header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Content-Type: application/json; charset=utf-8");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
+    http_response_code(204);
     exit;
 }
 
-/* ======================
-   Cargar .env
-====================== */
-require_once __DIR__ . '/../vendor/autoload.php';  // Asegúrate de que el autoload de Composer esté presente
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Método no permitido']);
+    exit;
+}
 
-// Ruta correcta a la raíz del proyecto
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');  // Correcta ruta desde 'api' a la raíz
-$dotenv->load();
+// **Nuevo enfoque**: Mostrar el contenido del archivo .env para depuración
+$envFilePath = __DIR__ . '/../.env';  // Asegúrate de que esta ruta sea correcta
 
-// Verificar que las variables de entorno se están cargando correctamente
+// Verificar si el archivo .env existe y mostrar su contenido
+$envExists = file_exists($envFilePath);
+
+// Cargar las variables de entorno manualmente sin phpdotenv
+if ($envExists) {
+    $envContent = file_get_contents($envFilePath);
+    foreach (explode("\n", $envContent) as $line) {
+        // Solo cargar líneas que tengan '='
+        if (strpos($line, '=') !== false) {
+            list($key, $value) = explode('=', $line, 2);
+            putenv(trim($key) . '=' . trim($value));  // Establecer la variable de entorno manualmente
+        }
+    }
+}
+
+// Verificar que las variables de entorno se cargaron correctamente
 $host = getenv('DB_HOST');
 $port = getenv('DB_PORT');
 $dbname = getenv('DB_NAME');
-$dbuser = getenv('DB_USER');
-$dbpass = getenv('DB_PASSWORD');
+$user = getenv('DB_USER');
+$password = getenv('DB_PASSWORD');
 
-$brevoApiKey = getenv('BREVO_API_KEY');
-$fromEmail = getenv('MAILER_FROM_ADDRESS');
-$fromName = getenv('MAILER_FROM_NAME');
-
-// Comprobar si alguna variable de entorno está vacía
-if (!$host || !$port || !$dbname || !$dbuser || !$dbpass || !$brevoApiKey || !$fromEmail || !$fromName) {
+// Si alguna de las variables es false, muestra un error detallado
+if (!$host || !$port || !$dbname || !$user || !$password) {
     http_response_code(500);
     echo json_encode([
         'error' => 'Faltan variables de entorno necesarias',
@@ -44,33 +54,26 @@ if (!$host || !$port || !$dbname || !$dbuser || !$dbpass || !$brevoApiKey || !$f
             'DB_HOST' => $host ? $host : 'no definido',
             'DB_PORT' => $port ? $port : 'no definido',
             'DB_NAME' => $dbname ? $dbname : 'no definido',
-            'DB_USER' => $dbuser ? $dbuser : 'no definido',
-            'DB_PASSWORD' => $dbpass ? 'definido' : 'no definido',
-            'BREVO_API_KEY' => $brevoApiKey ? 'definido' : 'no definido',
-            'MAILER_FROM_ADDRESS' => $fromEmail ? 'definido' : 'no definido',
-            'MAILER_FROM_NAME' => $fromName ? 'definido' : 'no definido'
+            'DB_USER' => $user ? $user : 'no definido',
+            'DB_PASSWORD' => $password ? 'definido' : 'no definido'
         ]
     ]);
     exit;
 }
 
-/* ======================
-   Conexión a la base de datos
-====================== */
+// Conexión a la base de datos
 try {
-    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;user=$dbuser;password=$dbpass;sslmode=require");
+    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require");
     $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (Exception $e) {
+} catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'No se pudo conectar a la base de datos', 'details' => $e->getMessage()]);
+    echo json_encode(['error' => 'Error al conectar a la base de datos', 'details' => $e->getMessage()]);
     exit;
 }
 
-/* ======================
-   Input
-====================== */
-$data = json_decode(file_get_contents("php://input"), true);
-$email = strtolower(trim($data["email"] ?? ""));
+// Obtener datos de la solicitud (esperamos un email)
+$data = json_decode(file_get_contents('php://input'), true);
+$email = strtolower(trim($data["email"] ?? ""));  // Usamos solo el email
 
 if ($email === "") {
     http_response_code(400);
@@ -78,9 +81,7 @@ if ($email === "") {
     exit;
 }
 
-/* ======================
-   Buscar usuario
-====================== */
+// --- Buscar usuario por email ---
 $stmt = $conn->prepare("SELECT id, nombre FROM usuarios WHERE email = :email LIMIT 1");
 $stmt->execute([':email' => $email]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -91,23 +92,18 @@ if (!$user) {
     exit;
 }
 
-/* ======================
-   Generar nueva contraseña
-====================== */
+// --- Generar nueva contraseña ---
 $newPass = strtoupper(bin2hex(random_bytes(4)));  // Generar nueva contraseña
 $hash = password_hash($newPass, PASSWORD_BCRYPT);
 
 $stmt = $conn->prepare("UPDATE usuarios SET clave_bcrypt = :c WHERE id = :id");
 $stmt->execute([':c' => $hash, ':id' => $user['id']]);
 
-
-/* ======================
-   Enviar Mail (Brevo)
-====================== */
+// --- Enviar Mail con Brevo ---
 $payload = [
     "sender" => [
-        "name" => $fromName,
-        "email" => $fromEmail
+        "name" => getenv('MAILER_FROM_NAME'),
+        "email" => getenv('MAILER_FROM_ADDRESS')
     ],
     "to" => [[
         "email" => $email,
@@ -125,7 +121,7 @@ $ch = curl_init("https://api.brevo.com/v3/smtp/email");
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
     "Accept: application/json",
     "Content-Type: application/json",
-    "api-key: $brevoApiKey"
+    "api-key: " . getenv('BREVO_API_KEY')
 ]);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
