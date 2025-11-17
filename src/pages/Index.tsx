@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KPICard } from "@/components/KPICard";
 import {
   DollarSign,
   Calendar,
   TrendingUp,
   Activity,
-  Package,
   FileSpreadsheet,
   FileText,
   MoonStar,
@@ -14,6 +13,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -76,25 +82,47 @@ export default function Dashboard(): JSX.Element {
   const [selectedEvent, setSelectedEvent] = useState<EventData | null>(null);
   const [openSummary, setOpenSummary] = useState(false);
   const [calendarDate, setCalendarDate] = useState<Date | null>(null);
+  const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(
+    new Date().toISOString().slice(0, 7)
+  );
 
-  const fetchDashboard = async (query = "") => {
-    setLoading(true);
-    try {
-      const res = await fetch(
-        `http://localhost:8000/api/dashboard.php${query}`
-      );
-      const json = (await res.json()) as DashboardResponse;
-      setData(json);
-    } catch (err) {
-      console.error("Error al cargar dashboard:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const fetchDashboard = useCallback(
+    async (extraParams?: Record<string, string>) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ month: selectedMonth });
+        if (extraParams) {
+          Object.entries(extraParams).forEach(([key, value]) => {
+            params.set(key, value);
+          });
+        }
+        const res = await fetch(
+          `http://localhost:8000/api/dashboard.php?${params.toString()}`
+        );
+        const json = (await res.json()) as DashboardResponse;
+        setData(json);
+      } catch (err) {
+        console.error("Error al cargar dashboard:", err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [selectedMonth]
+  );
 
   useEffect(() => {
     fetchDashboard();
-  }, []);
+  }, [fetchDashboard]);
+
+  useEffect(() => {
+    const [year, month] = selectedMonth
+      .split("-")
+      .map((value) => parseInt(value, 10));
+    if (!Number.isNaN(year) && !Number.isNaN(month)) {
+      setCalendarDate(new Date(year, month - 1, 1));
+    }
+  }, [selectedMonth]);
 
   const formatCurrency = (v: number) =>
     `$${new Intl.NumberFormat("es-AR").format(v)}`;
@@ -105,38 +133,36 @@ export default function Dashboard(): JSX.Element {
       month: "short",
     });
 
-  const eventsMerged = useMemo(() => {
+  const pastEvents = useMemo(() => {
     if (!data) return [];
-    const list: EventData[] = [];
-    if (data.currentNight) {
-      list.push({
-        id: "actual",
-        name: data.currentNight.eventName,
-        date: new Date().toISOString().split("T")[0],
-        entradasVendidas: data.currentNight.entradasVendidas,
-        recaudacion: data.currentNight.recaudacion,
-        ocupacion: data.currentNight.ocupacion,
-        consumoPromedio: 0,
-        barrasActivas: 0,
-        mesasReservadas: 0,
-      });
-    }
-    return [
-      ...list,
-      ...data.upcomingEvents.sort(
-        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-      ),
-      ...data.pastEvents.sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      ),
-    ];
+    return [...data.pastEvents].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
   }, [data]);
+
+  const monthOptions = useMemo(() => {
+    const options: { value: string; label: string }[] = [];
+    const formatter = new Intl.DateTimeFormat("es-AR", {
+      month: "long",
+      year: "numeric",
+    });
+    for (let i = 0; i < 8; i += 1) {
+      const ref = new Date();
+      ref.setMonth(ref.getMonth() - i, 1);
+      const value = ref.toISOString().slice(0, 7);
+      const label = formatter
+        .format(ref)
+        .replace(/^./, (char) => char.toUpperCase());
+      options.push({ value, label });
+    }
+    return options;
+  }, []);
 
   // ---- Calendario filtrable ----
   const findEventByDate = (date: Date) => {
     if (!data) return null;
     const target = date.toISOString().split("T")[0];
-    return data.pastEvents.find((e) => e.date === target) || null;
+    return data.pastEvents.find((e) => e.date.split("T")[0] === target) || null;
   };
 
   const lastClickRef = useRef<{ date: Date; time: number } | null>(null);
@@ -147,12 +173,23 @@ export default function Dashboard(): JSX.Element {
     const isDouble = sameDay && now - (last?.time ?? 0) < 400;
 
     if (isDouble) {
+      setCalendarDate(date);
       const event = findEventByDate(date);
-      if (event) {
-        setSelectedEvent(event);
+      if (!event) {
+        setSelectedEvent(null);
+        setCalendarMessage("No hay evento registrado este día.");
+        setOpenSummary(true);
+      } else if (
+        event.entradasVendidas === 0 &&
+        Math.round(event.recaudacion) === 0
+      ) {
+        setSelectedEvent(null);
+        setCalendarMessage("No hay datos del evento.");
         setOpenSummary(true);
       } else {
-        fetchDashboard(`?day=${date.toISOString().slice(0, 10)}`);
+        setCalendarMessage(null);
+        setSelectedEvent(event);
+        setOpenSummary(true);
       }
     }
     lastClickRef.current = { date, time: now };
@@ -178,18 +215,34 @@ export default function Dashboard(): JSX.Element {
             Seguimiento de ventas, eventos y ocupación
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="w-full sm:w-56">
+              <SelectValue placeholder="Seleccionar mes" />
+            </SelectTrigger>
+            <SelectContent>
+              {monthOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
             onClick={() =>
-              window.open("http://localhost:8000/api/dashboard.php?export=csv")
+              window.open(
+                `http://localhost:8000/api/dashboard.php?month=${selectedMonth}&export=csv`
+              )
             }
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
           </Button>
           <Button
             onClick={() =>
-              window.open("http://localhost:8000/api/dashboard.php?export=pdf")
+              window.open(
+                `http://localhost:8000/api/dashboard.php?month=${selectedMonth}&export=pdf`
+              )
             }
           >
             <FileText className="w-4 h-4 mr-2" /> PDF
@@ -270,22 +323,36 @@ export default function Dashboard(): JSX.Element {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border border-border bg-neutral-900 text-neutral-100 p-3 shadow-sm">
+          <div className="rounded-md border border-border bg-neutral-900 text-neutral-100 p-3 shadow-sm select-none">
             <CalendarView
               className="w-full dark-calendar"
               locale="es-AR"
               value={calendarDate || new Date()}
               onClickDay={handleDayClick}
+              tileClassName={({ date }) => {
+                const e = findEventByDate(date);
+                if (!e) return "";
+                const hasData =
+                  e.entradasVendidas > 0 || Math.round(e.recaudacion) > 0;
+                return hasData ? "event-purple" : "event-blue";
+              }}
               tileContent={({ date }) => {
                 const e = findEventByDate(date);
                 return e ? (
-                  <div className="mt-1 h-1 w-1 mx-auto rounded-full bg-blue-400" />
+                  <div
+                    className={`mt-1 h-1 w-1 mx-auto rounded-full ${
+                      e.entradasVendidas > 0 || Math.round(e.recaudacion) > 0
+                        ? "bg-purple-400"
+                        : "bg-blue-400"
+                    }`}
+                  />
                 ) : null;
               }}
             />
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Doble clic sobre un día para ver el resumen de esa noche.
+            Doble clic sobre un día para ver si hay evento registrado o sus
+            resultados.
           </p>
         </CardContent>
       </Card>
@@ -298,9 +365,14 @@ export default function Dashboard(): JSX.Element {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {eventsMerged.map((e, index) => (
+          {pastEvents.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              No hay eventos registrados para el mes seleccionado.
+            </p>
+          )}
+          {pastEvents.map((e) => (
             <div
-              key={`${e.id}-${index}`}
+              key={e.id}
               className="flex justify-between items-center border border-border rounded-lg p-3 hover:bg-surface/10 transition-all"
             >
               <div>
@@ -317,6 +389,7 @@ export default function Dashboard(): JSX.Element {
                   size="sm"
                   variant="outline"
                   onClick={() => {
+                    setCalendarMessage(null);
                     setSelectedEvent(e);
                     setOpenSummary(true);
                   }}
@@ -330,14 +403,28 @@ export default function Dashboard(): JSX.Element {
       </Card>
 
       {/* Modal resumen */}
-      <Dialog open={openSummary} onOpenChange={setOpenSummary}>
+      <Dialog
+        open={openSummary}
+        onOpenChange={(open) => {
+          setOpenSummary(open);
+          if (!open) {
+            setCalendarMessage(null);
+            setSelectedEvent(null);
+          }
+        }}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {selectedEvent ? selectedEvent.name : "Resumen de la noche"}
+              {selectedEvent
+                ? selectedEvent.name
+                : calendarMessage || "Resumen del evento"}
             </DialogTitle>
           </DialogHeader>
-          {selectedEvent && (
+          {calendarMessage && (
+            <p className="text-sm text-muted-foreground">{calendarMessage}</p>
+          )}
+          {selectedEvent && !calendarMessage && (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
                 Fecha: {formatDate(selectedEvent.date)}
@@ -361,12 +448,64 @@ export default function Dashboard(): JSX.Element {
             background-color: #111827;
             color: #e5e7eb;
             border-radius: 0.5rem;
+            font-size: 0.95rem;
+          }
+          .dark-calendar .react-calendar__navigation {
+            background: transparent !important;
+          }
+          .dark-calendar .react-calendar__navigation button {
+            color: #f3f4f6 !important;
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s ease, color 0.2s ease;
+          }
+          .dark-calendar .react-calendar__navigation button:enabled:hover {
+            background-color: rgba(59, 130, 246, 0.15) !important;
+            color: #93c5fd !important;
+          }
+          .dark-calendar .react-calendar__navigation button:enabled:active {
+            background-color: rgba(59, 130, 246, 0.25) !important;
+            color: #bfdbfe !important;
+          }
+          .dark-calendar .react-calendar__tile {
+            padding: 0.8rem 0;
+            border-radius: 0.6rem;
+            transition: all 0.2s ease;
+            background: transparent !important;
+            position: relative;
+          }
+          .dark-calendar .react-calendar__tile:hover {
+            background-color: rgba(59, 130, 246, 0.15) !important;
           }
           .dark-calendar .react-calendar__tile--now {
-            background-color: rgba(147,51,234,0.15) !important;
+          background-color: rgba(147, 51, 234, 0.15) !important;
+            border-radius: 9999px;
           }
-          .dark-calendar .react-calendar__tile--active {
-            background-color: rgba(59,130,246,0.25) !important;
+          .dark-calendar button:focus {
+            background: transparent !important;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+          }
+          .dark-calendar .event-blue {
+            background-color: rgba(37, 99, 235, 0.4) !important;
+            color: #fff !important;
+            border-radius: 0.5rem;
+          }
+          .dark-calendar .event-blue:hover {
+            background-color: rgba(59, 130, 246, 0.5) !important;
+          }
+          .dark-calendar .event-purple {
+            background-color: rgba(126, 34, 206, 0.4) !important;
+            color: #fff !important;
+            border-radius: 0.5rem;
+          }
+          .dark-calendar .event-purple:hover {
+            background-color: rgba(147, 51, 234, 0.55) !important;
+          }
+          .dark-calendar .react-calendar__month-view__days__day--neighboringMonth {
+            opacity: 0.25;
           }
         `,
         }}

@@ -10,6 +10,163 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
+function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight): void
+{
+    $rows = [];
+    $rows[] = ['Sección', 'Concepto', 'Valor'];
+    $rows[] = ['Métricas del mes', 'Eventos del mes', $metrics['eventosMes']];
+    $rows[] = ['Métricas del mes', 'Entradas vendidas', $metrics['entradasMes']];
+    $rows[] = ['Métricas del mes', 'Recaudación', number_format($metrics['recaudacionMes'], 2, ',', '.')];
+    $rows[] = ['Métricas del mes', 'Ocupación promedio', $metrics['ocupacionPromedio'] . '%'];
+
+    if ($monthlySummary) {
+        $rows[] = [];
+        $rows[] = ['Resumen mensual', 'Mes', $monthlySummary['monthLabel']];
+        $rows[] = ['Resumen mensual', 'Total eventos', $monthlySummary['totalEventos']];
+        $rows[] = ['Resumen mensual', 'Total entradas', $monthlySummary['totalEntradas']];
+        $rows[] = ['Resumen mensual', 'Recaudación', number_format($monthlySummary['recaudacion'], 2, ',', '.')];
+        $rows[] = ['Resumen mensual', 'Ocupación promedio', $monthlySummary['ocupacionPromedio'] . '%'];
+    }
+
+    if ($currentNight) {
+        $rows[] = [];
+        $rows[] = ['Evento en curso', 'Nombre', $currentNight['eventName']];
+        $rows[] = ['Evento en curso', 'Fecha', $currentNight['fecha']];
+        $rows[] = ['Evento en curso', 'Entradas', $currentNight['entradasVendidas']];
+        $rows[] = ['Evento en curso', 'Ocupación', $currentNight['ocupacion'] . '%'];
+    }
+
+    $rows[] = [];
+    $rows[] = ['Eventos del mes', 'Nombre', 'Fecha', 'Entradas', 'Recaudación', 'Ocupación'];
+    if (count($pastEvents) === 0) {
+        $rows[] = ['Eventos del mes', 'Sin eventos registrados', '', '', '', ''];
+    } else {
+        foreach ($pastEvents as $event) {
+            $rows[] = [
+                'Eventos del mes',
+                $event['name'],
+                substr($event['date'], 0, 10),
+                $event['entradasVendidas'],
+                number_format($event['recaudacion'], 2, ',', '.'),
+                $event['ocupacion'] . '%'
+            ];
+        }
+    }
+
+    $stream = fopen('php://temp', 'r+');
+    foreach ($rows as $row) {
+        fputcsv($stream, $row, ';');
+    }
+    rewind($stream);
+    $csv = stream_get_contents($stream);
+    fclose($stream);
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    echo $csv;
+    exit;
+}
+
+function pdfEscape(string $text): string
+{
+    return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $text);
+}
+
+function buildSimplePdf(array $lines): string
+{
+    $content = "BT\n/F1 16 Tf\n";
+    $y = 770;
+    foreach ($lines as $line) {
+        if (function_exists('mb_convert_encoding')) {
+            $converted = mb_convert_encoding($line, 'Windows-1252', 'UTF-8');
+        } else {
+            $converted = iconv('UTF-8', 'Windows-1252//TRANSLIT', $line);
+        }
+        if ($converted === false) {
+            $converted = $line;
+        }
+        $content .= sprintf("1 0 0 1 72 %.2f Tm\n(%s) Tj\n", $y, pdfEscape($converted));
+        $y -= 22;
+        if ($y < 72) {
+            $y = 750;
+        }
+    }
+    $content .= "ET\n";
+
+    $objects = [];
+    $objects[] = "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj";
+    $objects[] = "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj";
+    $objects[] = "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj";
+    $objects[] = "4 0 obj << /Length " . strlen($content) . " >>\nstream\n" . $content . "endstream\nendobj";
+    $objects[] = "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj";
+
+    $pdf = "%PDF-1.4\n";
+    $offsets = [0];
+    foreach ($objects as $object) {
+        $offsets[] = strlen($pdf);
+        $pdf .= $object . "\n";
+    }
+
+    $xrefPosition = strlen($pdf);
+    $pdf .= "xref\n0 " . (count($objects) + 1) . "\n";
+    $pdf .= "0000000000 65535 f \n";
+    for ($i = 1; $i <= count($objects); $i++) {
+        $pdf .= sprintf("%010d 00000 n \n", $offsets[$i]);
+    }
+    $pdf .= "trailer << /Size " . (count($objects) + 1) . " /Root 1 0 R >>\n";
+    $pdf .= "startxref\n" . $xrefPosition . "\n%%EOF";
+
+    return $pdf;
+}
+
+function sendPdfExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight): void
+{
+    $lines = [];
+    $lines[] = 'Dashboard Santas - Resumen de métricas';
+    if ($monthlySummary) {
+        $lines[] = 'Mes: ' . $monthlySummary['monthLabel'];
+    }
+    $lines[] = '';
+    $lines[] = 'Eventos del mes: ' . $metrics['eventosMes'];
+    $lines[] = 'Entradas vendidas: ' . $metrics['entradasMes'];
+    $lines[] = 'Recaudación: $' . number_format($metrics['recaudacionMes'], 2, ',', '.');
+    $lines[] = 'Ocupación promedio: ' . $metrics['ocupacionPromedio'] . '%';
+
+    if ($currentNight) {
+        $lines[] = '';
+        $lines[] = 'Evento en curso: ' . $currentNight['eventName'];
+        $lines[] = 'Fecha: ' . $currentNight['fecha'];
+        $lines[] = 'Entradas: ' . $currentNight['entradasVendidas'];
+        $lines[] = 'Ocupación: ' . $currentNight['ocupacion'] . '%';
+    }
+
+    $lines[] = '';
+    $lines[] = 'Eventos del mes:';
+    if (count($pastEvents) === 0) {
+        $lines[] = '  • Sin eventos registrados en el período.';
+    } else {
+        foreach (array_slice($pastEvents, 0, 8) as $event) {
+            $lines[] = sprintf(
+                '  • %s - %s | Entradas: %d | Recaudación: $%s',
+                substr($event['date'], 0, 10),
+                $event['name'],
+                $event['entradasVendidas'],
+                number_format($event['recaudacion'], 2, ',', '.')
+            );
+        }
+        if (count($pastEvents) > 8) {
+            $lines[] = '  • ...';
+        }
+    }
+
+    $pdf = buildSimplePdf($lines);
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    echo $pdf;
+    exit;
+}
+
+
 $host = "aws-1-us-east-2.pooler.supabase.com";
 $port = "5432";
 $dbname = "postgres";
@@ -126,12 +283,18 @@ try {
 
 
     // === 4. Eventos pasados ===
-    $params = [];
-    $where  = "e.fecha < NOW()";
+    $params = [':mstart' => $monthStart, ':mend' => $monthEnd];
+    $whereParts = [
+        "DATE(e.fecha) >= :mstart::date",
+        "DATE(e.fecha) < :mend::date",
+        "e.fecha < NOW()"
+    ];
     if ($dayParam && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dayParam)) {
-        $where = "DATE(e.fecha) = :day::date";
-        $params[':day'] = $dayParam;
+        $whereParts = ["DATE(e.fecha) = :day::date"];
+        $params = [':day' => $dayParam];
     }
+
+    $where = implode(' AND ', $whereParts);
 
     $pastSql = "
         SELECT e.id, e.nombre AS name, TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
@@ -237,9 +400,7 @@ try {
         ];
     }
 
-    // === Salida final ===
-    header("Content-Type: application/json; charset=utf-8");
-    echo json_encode([
+    $response = [
         'metrics' => $metrics,
         'currentNight' => $currentNight,
         'upcomingEvents' => $upcomingEvents,
@@ -249,7 +410,31 @@ try {
         'attendanceData' => $attendanceData,
         'categoryData' => $categoryData,
         'recentActivity' => $recentActivity
-    ], JSON_UNESCAPED_UNICODE);
+    ];
+
+    if ($export === 'csv') {
+        sendCsvExport(
+            'dashboard-metricas-' . date('Ymd_His') . '.csv',
+            $metrics,
+            $monthlySummary,
+            $pastEvents,
+            $currentNight
+        );
+    }
+
+    if ($export === 'pdf') {
+        sendPdfExport(
+            'dashboard-metricas-' . date('Ymd_His') . '.pdf',
+            $metrics,
+            $monthlySummary,
+            $pastEvents,
+            $currentNight
+        );
+    }
+
+    // === Salida final ===
+    header("Content-Type: application/json; charset=utf-8");
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
 } catch (PDOException $e) {
     http_response_code(500);
     header("Content-Type: application/json; charset=utf-8");
