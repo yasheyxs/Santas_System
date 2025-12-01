@@ -20,8 +20,8 @@ const ensureQzLoaded = (): qz.QZ => {
 };
 
 const configureSecurity = (qzInstance: qz.QZ) => {
-  qzInstance.security.setCertificatePromise(() => Promise.resolve(null));
-  qzInstance.security.setSignaturePromise(() => Promise.resolve(null));
+  qzInstance.security.setCertificatePromise((resolve) => resolve(null));
+  qzInstance.security.setSignaturePromise(() => (resolve) => resolve(null));
 };
 
 // Conectar a la impresora
