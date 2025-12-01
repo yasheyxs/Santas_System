@@ -20,17 +20,21 @@ type QZTray = {
   };
   security: {
     setCertificatePromise: (
-      promise: (
-        resolve: (certificate?: string | null) => void,
-        reject?: (reason?: unknown) => void
-      ) => void
+      promise:
+        | (() => Promise<string | null>)
+        | ((
+            resolve: (certificate?: string | null) => void,
+            reject?: (reason?: unknown) => void
+          ) => void)
     ) => void;
     setSignaturePromise: (
-      promise: (
-        toSign: unknown,
-        resolve: (signature: string | null) => void,
-        reject?: (reason?: unknown) => void
-      ) => void
+      promise:
+        | (() => Promise<string | null>)
+        | ((
+            toSign: unknown,
+            resolve: (signature: string | null) => void,
+            reject?: (reason?: unknown) => void
+          ) => void)
     ) => void;
   };
   printers: {
@@ -66,8 +70,8 @@ const ensureConnection = async () => {
   const qz = getQz();
 
   if (!qz.websocket.isActive()) {
-    qz.security.setCertificatePromise((resolve) => resolve(null));
-    qz.security.setSignaturePromise((toSign, resolve) => resolve(null));
+    qz.security.setCertificatePromise(() => Promise.resolve(null));
+    qz.security.setSignaturePromise(() => Promise.resolve(null));
 
     await qz.websocket.connect({
       host: "localhost",

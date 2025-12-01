@@ -19,9 +19,16 @@ const ensureQzLoaded = (): qz.QZ => {
   return window.qz;
 };
 
+const configureSecurity = (qzInstance: qz.QZ) => {
+  qzInstance.security.setCertificatePromise(() => Promise.resolve(null));
+  qzInstance.security.setSignaturePromise(() => Promise.resolve(null));
+};
+
 // Conectar a la impresora
 export const connectPrinter = async (): Promise<void> => {
   const qz = ensureQzLoaded();
+
+  configureSecurity(qz);
 
   if (qz.websocket.isActive()) {
     console.log("Conexión WebSocket activa");
@@ -29,7 +36,11 @@ export const connectPrinter = async (): Promise<void> => {
   }
 
   try {
-    await qz.websocket.connect();
+    await qz.websocket.connect({
+      host: "localhost",
+      keepAlive: true,
+      secure: false,
+    });
     console.log("Conexión WebSocket establecida");
   } catch (error) {
     console.error("Error al conectar a QZ Tray: ", error);

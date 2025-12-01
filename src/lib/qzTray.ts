@@ -10,41 +10,6 @@ interface EntradaTicketPayload {
   printer?: string | null;
 }
 
-const normalizePem = (pem?: string) =>
-  pem?.replace(/\\n/g, "\n").trim() ?? "";
-
-const decodePrivateKey = async (privateKeyPem: string) => {
-  const cleaned = privateKeyPem
-    .replace("-----BEGIN PRIVATE KEY-----", "")
-    .replace("-----END PRIVATE KEY-----", "")
-    .replace(/\s+/g, "");
-
-  const binary = Uint8Array.from(atob(cleaned), (char) => char.charCodeAt(0));
-
-  return crypto.subtle.importKey(
-    "pkcs8",
-    binary.buffer,
-    {
-      name: "RSASSA-PKCS1-v1_5",
-      hash: "SHA-256",
-    },
-    false,
-    ["sign"]
-  );
-};
-
-const signMessage = async (message: string, privateKeyPem: string) => {
-  const key = await decodePrivateKey(privateKeyPem);
-  const encoder = new TextEncoder();
-  const signature = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    key,
-    encoder.encode(message)
-  );
-
-  return btoa(String.fromCharCode(...new Uint8Array(signature)));
-};
-
 const ensureQzLoaded = async () => {
   if (typeof window === "undefined") {
     throw new Error("QZ Tray sólo está disponible en el navegador");
@@ -93,25 +58,8 @@ const ensureQzLoaded = async () => {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const configureSecurity = async (qz: any) => {
-  const certificate = normalizePem(import.meta.env.VITE_QZ_CERTIFICATE);
-  const privateKey = normalizePem(import.meta.env.VITE_QZ_PRIVATE_KEY);
-
-  if (!certificate) {
-    throw new Error(
-      "Falta configurar VITE_QZ_CERTIFICATE con el certificado público de QZ Tray"
-    );
-  }
-
-  if (!privateKey) {
-    throw new Error(
-      "Falta configurar VITE_QZ_PRIVATE_KEY con la clave privada para firmar"
-    );
-  }
-
-  qz.security.setCertificatePromise(() => Promise.resolve(certificate));
-  qz.security.setSignaturePromise((toSign: string) =>
-    signMessage(toSign, privateKey)
-  );
+  qz.security.setCertificatePromise(() => Promise.resolve(null));
+  qz.security.setSignaturePromise(() => Promise.resolve(null));
 };
 
 const ensureQzConnection = async () => {
@@ -123,7 +71,11 @@ const ensureQzConnection = async () => {
   }
 
   try {
-    await qz.websocket.connect();
+    await qz.websocket.connect({
+      host: "localhost",
+      keepAlive: true,
+      secure: false,
+    });
     return qz;
   } catch (error) {
     if (
@@ -164,12 +116,14 @@ const buildTicketHtml = (payload: EntradaTicketPayload) => {
 
 export const printEntradaTicket = async (payload: EntradaTicketPayload) => {
   const qz = await ensureQzConnection();
-  const printer = payload.printer ?? import.meta.env.VITE_QZ_PRINTER ?? null;
+  const printer =
+    payload.printer ?? import.meta.env.VITE_QZ_PRINTER ?? "Xprinter XPE200L";
 
   const config = qz.configs.create(printer, {
     scaleContent: true,
     rasterize: true,
     altPrinting: false,
+    encoding: "CP1252",
   });
 
   const html = buildTicketHtml(payload);
