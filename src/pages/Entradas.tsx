@@ -72,6 +72,19 @@ type StatCounterVariant = "primary" | "accent" | "success" | "default";
 
 type VentasPorEvento = Record<string, Record<number, number>>;
 
+interface VentaRegistradaResponse {
+  id: number;
+  id_venta?: number;
+  entrada_id: number;
+  evento_id: number | null;
+  cantidad: number;
+  precio_unitario: number;
+  incluye_trago: boolean;
+  fecha_venta?: string;
+  total?: number;
+  control_code?: string;
+}
+
 export default function Entradas() {
   const { toast } = useToast();
   const [selectedEvent, setSelectedEvent] = useState<string>("");
@@ -103,6 +116,48 @@ export default function Entradas() {
       }),
     []
   );
+
+  const imprimirTicket = async (
+    venta: VentaRegistradaResponse,
+    entradaNombre: string
+  ) => {
+    try {
+      const { printTicket } = await import("@/lib/printing");
+      const fechaVenta = venta.fecha_venta
+        ? new Date(venta.fecha_venta)
+        : new Date();
+
+      const payload = {
+        tipo:
+          venta.cantidad > 1
+            ? `${entradaNombre} x${venta.cantidad}`
+            : `${entradaNombre}${venta.incluye_trago ? " + Trago" : ""}`,
+        id: String(venta.id_venta ?? venta.id),
+        fecha: fechaVenta.toLocaleDateString("es-AR"),
+        hora: fechaVenta.toLocaleTimeString("es-AR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      };
+
+      const controlCode =
+        venta.control_code || `SC-${String(venta.id_venta ?? venta.id)}`;
+
+      await printTicket(payload, controlCode);
+
+      toast({
+        title: "Ticket enviado a imprimir",
+        description: `Venta #${payload.id} (${payload.tipo})`,
+      });
+    } catch (printError) {
+      console.error("No se pudo imprimir el ticket:", printError);
+      toast({
+        title: "Venta registrada, pero no se imprimió",
+        description: "Revisá la conexión de la impresora e intentá de nuevo.",
+        variant: "destructive",
+      });
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -342,7 +397,10 @@ export default function Entradas() {
         incluye_trago: tipoOperacion === "venta" ? incluyeTrago : false,
       };
 
-      const { data } = await api.post("/venta_entradas.php", payload);
+      const { data } = await api.post<VentaRegistradaResponse>(
+        "/venta_entradas.php",
+        payload
+      );
       const eventKey =
         data?.evento_id !== undefined && data?.evento_id !== null
           ? String(data.evento_id)
@@ -385,6 +443,10 @@ export default function Entradas() {
           tipoOperacion === "resta" ? "restadas" : "registradas"
         } correctamente.`,
       });
+
+      if (tipoOperacion === "venta") {
+        await imprimirTicket(data, entrada.nombre);
+      }
 
       cerrarVenta();
     } catch (error) {
