@@ -4,8 +4,8 @@ const SELECTED_PRINTER_KEY = "jspm:selectedPrinter";
 const PRINTER_CACHE_KEY = "jspm:cachedPrinters";
 
 const statusSubscribers = new Set<(status: number) => void>();
-let scriptPromise: Promise<unknown> | null = null;
-let connectionPromise: Promise<unknown> | null = null;
+let scriptPromise: Promise<JSPMInterface> | null = null;
+let connectionPromise: Promise<JSPMInterface> | null = null;
 
 export type TicketPayload = {
   id: string;
@@ -136,6 +136,42 @@ async function loadJspmLibrary(): Promise<JSPMInterface> {
   return scriptPromise;
 }
 
+function resolveStatusLabel(
+  status: number | undefined,
+  WSStatus: JSPrintManagerInterface["WSStatus"] | undefined,
+): "open" | "closed" | "blocked" | "unknown" {
+  if (!status || !WSStatus) return "unknown";
+
+  if (status === WSStatus.Open) return "open";
+  if (status === WSStatus.Blocked) return "blocked";
+  if (status === WSStatus.Closed) return "closed";
+  return "unknown";
+}
+
+async function getCurrentStatus(jspm: JSPMInterface): Promise<{
+  status: number | undefined;
+  label: "open" | "closed" | "blocked" | "unknown";
+}> {
+  if (!jspm.JSPrintManager) {
+    const loaded = await loadJspmLibrary();
+    return {
+      status: loaded.JSPrintManager?.websocket_status,
+      label: resolveStatusLabel(
+        loaded.JSPrintManager?.websocket_status,
+        loaded.JSPrintManager?.WSStatus,
+      ),
+    };
+  }
+
+  return {
+    status: jspm.JSPrintManager.websocket_status,
+    label: resolveStatusLabel(
+      jspm.JSPrintManager.websocket_status,
+      jspm.JSPrintManager.WSStatus,
+    ),
+  };
+}
+
 
 function handleStatusHooks(jspm: JSPMInterface): void {
   const onStatusChange = () => {
@@ -174,6 +210,12 @@ async function ensureConnected(): Promise<JSPMInterface> {
     connectionPromise = new Promise((resolve, reject) => {
       handleStatusHooks(jspm);
 
+      const retryStart = () => {
+        if (jspm.JSPrintManager?.websocket_status === jspm.JSPrintManager?.WSStatus.Closed) {
+          jspm.JSPrintManager.start();
+        }
+      };
+
       const checkStatus = () => {
         if (jspm.JSPrintManager) {
           const status = jspm.JSPrintManager.websocket_status;
@@ -184,17 +226,39 @@ async function ensureConnected(): Promise<JSPMInterface> {
           }
 
           if (status === jspm.JSPrintManager.WSStatus.Blocked) {
-            reject(new Error("El navegador bloqueó la conexión con el servicio de impresión."));
+            reject(new Error("El navegador bloqueó la conexión con el servicio de impresión. Habilita los WebSockets para continuar."));
+            return;
+          }
+
+          if (status === jspm.JSPrintManager.WSStatus.Closed) {
+            retryStart();
           }
         }
       };
 
+      const timeout = window.setTimeout(() => {
+        reject(
+          new Error(
+            "No se pudo conectar con jsPrintManager. Verificá que la aplicación esté ejecutándose y que los WebSockets no estén bloqueados.",
+          ),
+        );
+      }, 12000);
+
       checkStatus();
       const interval = window.setInterval(() => {
         checkStatus();
-      }, 350);
+      }, 450);
 
-      connectionPromise?.finally(() => window.clearInterval(interval));
+      if (connectionPromise) {
+        connectionPromise
+          .finally(() => {
+            window.clearInterval(interval);
+            window.clearTimeout(timeout);
+          })
+          .catch(() => {
+            connectionPromise = null;
+          });
+      }
     });
   }
 
@@ -209,6 +273,14 @@ export async function initializePrintService(): Promise<void> {
 export async function isPrintServiceConnected(): Promise<boolean> {
   const jspm = await loadJspmLibrary();
   return jspm.JSPrintManager && jspm.JSPrintManager.websocket_status === jspm.JSPrintManager.WSStatus.Open;
+}
+
+export async function getCurrentWebSocketState(): Promise<{
+  status: number | undefined;
+  label: "open" | "closed" | "blocked" | "unknown";
+}> {
+  const jspm = await loadJspmLibrary();
+  return getCurrentStatus(jspm);
 }
 
 function getLocalStorage(): Storage {

@@ -149,32 +149,102 @@ export default function Entradas() {
   }, []);
 
   const bootstrapPrinting = async () => {
+    setLoadingPrinters(true);
     try {
       const printing = await ensurePrintingClient();
 
       const savedPrinter = printing.getSavedPrinter();
       setSelectedPrinter(savedPrinter ?? "");
-      setLoadingPrinters(true);
 
       try {
         await printing.initializePrintService();
       } catch (serviceError) {
         console.error("No se pudo iniciar jsPrintManager:", serviceError);
+        toast({
+          title: "No se pudo iniciar jsPrintManager",
+          description:
+            serviceError instanceof Error
+              ? serviceError.message
+              : "Revisá tu conexión e intentá nuevamente.",
+          variant: "destructive",
+        });
+        setPrintServiceConnected(false);
+        setPrinterDialogOpen(true);
+        return undefined;
       }
 
-      const connected = await printing.isPrintServiceConnected();
-      setPrintServiceConnected(connected);
+      const connectionState = await printing.getCurrentWebSocketState();
+      setPrintServiceConnected(connectionState.label === "open");
 
-      const printers = await printing.getPrintersOnce(!savedPrinter);
-      setAvailablePrinters(printers);
+      if (connectionState.label === "blocked") {
+        toast({
+          title: "Conexión bloqueada",
+          description:
+            "Habilitá los WebSockets para jsPrintManager o revisá la configuración de seguridad del navegador.",
+          variant: "destructive",
+        });
+        setPrinterDialogOpen(true);
+        return undefined;
+      }
 
-      if (!savedPrinter && printers.length > 0) {
+      if (connectionState.label === "closed") {
+        toast({
+          title: "Reconectando jsPrintManager",
+          description:
+            "Intentando reestablecer la conexión con el servicio de impresión.",
+        });
+        await printing.initializePrintService().catch(() => undefined);
+      }
+
+      let printers: string[] = [];
+      try {
+        printers = await printing.getPrintersOnce(!savedPrinter);
+        setAvailablePrinters(printers);
+
+        if (printers.length === 0) {
+          toast({
+            title: "No se detectaron impresoras locales",
+            description:
+              "Verificá que haya impresoras instaladas y que jsPrintManager esté en ejecución.",
+            variant: "destructive",
+          });
+        }
+      } catch (listError) {
+        console.error("No se pudieron obtener las impresoras:", listError);
+        toast({
+          title: "No se pudo cargar la lista de impresoras",
+          description:
+            "Revisá tu conexión con jsPrintManager e intentá nuevamente.",
+          variant: "destructive",
+        });
+      }
+
+      if ((!savedPrinter && printers.length > 0) || printers.length === 0) {
         setPrinterDialogOpen(true);
       }
 
       const unsubscribe = printing.onPrintServiceStatusChange(async () => {
-        const latestStatus = await printing.isPrintServiceConnected();
-        setPrintServiceConnected(latestStatus);
+        const latestStatus = await printing.getCurrentWebSocketState();
+        setPrintServiceConnected(latestStatus.label === "open");
+
+        if (latestStatus.label !== "open") {
+          setPrinterDialogOpen(true);
+
+          if (latestStatus.label === "blocked") {
+            toast({
+              title: "WebSocket bloqueado",
+              description:
+                "Habilitá WebSockets para mantener la conexión con la impresora.",
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Servicio de impresión desconectado",
+              description: "Intentando reconectar con jsPrintManager.",
+            });
+            printing.initializePrintService().catch(() => undefined);
+          }
+        }
       });
 
       return unsubscribe;
@@ -235,18 +305,40 @@ export default function Entradas() {
           "No se pudo iniciar el servicio de impresión:",
           serviceError
         );
+        toast({
+          title: "No se pudo iniciar jsPrintManager",
+          description:
+            serviceError instanceof Error
+              ? serviceError.message
+              : "Revisá la conexión del servicio y volvé a intentar.",
+          variant: "destructive",
+        });
+        setPrinterDialogOpen(true);
+        return;
       }
 
-      const connected = await printing.isPrintServiceConnected();
-      if (!connected) {
+      const connectionState = await printing.getCurrentWebSocketState();
+      if (connectionState.label === "blocked") {
         toast({
-          title: "Servicio de impresión desconectado",
-          description:
-            "Iniciá jsPrintManager y verificá la conexión antes de imprimir.",
+          title: "Conexión bloqueada",
+          description: "Habilitá WebSockets para continuar con la impresión.",
           variant: "destructive",
         });
         setPrintServiceConnected(false);
         setPrinterDialogOpen(true);
+        return;
+      }
+
+      if (connectionState.label !== "open") {
+        toast({
+          title: "Servicio de impresión desconectado",
+          description:
+            "Intentá reconectar jsPrintManager antes de imprimir el ticket.",
+          variant: "destructive",
+        });
+        setPrintServiceConnected(false);
+        setPrinterDialogOpen(true);
+        await printing.initializePrintService().catch(() => undefined);
         return;
       }
 
@@ -260,6 +352,17 @@ export default function Entradas() {
         setPrinterDialogOpen(true);
         return;
       }
+
+      if (availablePrinters.length === 0) {
+        toast({
+          title: "No se detectaron impresoras locales",
+          description: "Refrescá la lista de impresoras antes de imprimir.",
+          variant: "destructive",
+        });
+        setPrinterDialogOpen(true);
+        return;
+      }
+
       const fechaVenta = venta.fecha_venta
         ? new Date(venta.fecha_venta)
         : new Date();
@@ -379,9 +482,56 @@ export default function Entradas() {
       setLoadingPrinters(true);
       try {
         const printing = await ensurePrintingClient();
-        await printing.initializePrintService();
+        try {
+          await printing.initializePrintService();
+        } catch (serviceError) {
+          console.error("No se pudo iniciar jsPrintManager:", serviceError);
+          toast({
+            title: "No se pudo iniciar jsPrintManager",
+            description:
+              serviceError instanceof Error
+                ? serviceError.message
+                : "Verificá la instalación del servicio de impresión.",
+            variant: "destructive",
+          });
+          setPrinterDialogOpen(true);
+          return;
+        }
+
+        const status = await printing.getCurrentWebSocketState();
+        if (status.label === "blocked") {
+          toast({
+            title: "Conexión bloqueada",
+            description:
+              "Habilitá WebSockets para que jsPrintManager funcione correctamente.",
+            variant: "destructive",
+          });
+          setPrinterDialogOpen(true);
+          return;
+        }
+
+        if (status.label !== "open") {
+          toast({
+            title: "Servicio de impresión desconectado",
+            description:
+              "Reintentaremos la conexión antes de mostrar las impresoras.",
+          });
+          await printing.initializePrintService().catch(() => undefined);
+          setPrinterDialogOpen(true);
+          return;
+        }
         const printers = await printing.getPrintersOnce(forceRefresh);
         setAvailablePrinters(printers);
+
+        if (printers.length === 0) {
+          toast({
+            title: "No se detectaron impresoras locales",
+            description:
+              "Revisá que tus impresoras estén instaladas y visibles para jsPrintManager.",
+            variant: "destructive",
+          });
+          setPrinterDialogOpen(true);
+        }
 
         if (printers.length === 1 && !selectedPrinter) {
           setSelectedPrinter(printers[0]);
