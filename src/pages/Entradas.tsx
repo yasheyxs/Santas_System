@@ -1,11 +1,4 @@
-import React, {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useCallback,
-} from "react";
-
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Calendar,
   CheckCircle,
@@ -79,19 +72,6 @@ type StatCounterVariant = "primary" | "accent" | "success" | "default";
 
 type VentasPorEvento = Record<string, Record<number, number>>;
 
-interface VentaRegistradaResponse {
-  id: number;
-  id_venta?: number;
-  entrada_id: number;
-  evento_id: number | null;
-  cantidad: number;
-  precio_unitario: number;
-  incluye_trago: boolean;
-  fecha_venta?: string;
-  total?: number;
-  control_code?: string;
-}
-
 export default function Entradas() {
   const { toast } = useToast();
   const [selectedEvent, setSelectedEvent] = useState<string>("");
@@ -108,14 +88,6 @@ export default function Entradas() {
     "venta"
   );
   const [closingEvent, setClosingEvent] = useState<boolean>(false);
-  const [availablePrinters, setAvailablePrinters] = useState<string[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
-  const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
-  const [loadingPrinters, setLoadingPrinters] = useState(false);
-  const [printServiceConnected, setPrintServiceConnected] = useState(false);
-  const printingClientRef = useRef<typeof import("@/lib/printing") | null>(
-    null
-  );
 
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }),
@@ -131,306 +103,6 @@ export default function Entradas() {
       }),
     []
   );
-
-  const printerOptions = useMemo(
-    () =>
-      selectedPrinter && !availablePrinters.includes(selectedPrinter)
-        ? [selectedPrinter, ...availablePrinters]
-        : availablePrinters,
-    [availablePrinters, selectedPrinter]
-  );
-
-  const ensurePrintingClient = useCallback(async () => {
-    if (!printingClientRef.current) {
-      printingClientRef.current = await import("@/lib/printing");
-    }
-
-    return printingClientRef.current;
-  }, []);
-
-  const bootstrapPrinting = async () => {
-    setLoadingPrinters(true);
-    try {
-      const printing = await ensurePrintingClient();
-
-      const savedPrinter = printing.getSavedPrinter();
-      setSelectedPrinter(savedPrinter ?? "");
-
-      try {
-        await printing.initializePrintService();
-      } catch (serviceError) {
-        console.error("No se pudo iniciar jsPrintManager:", serviceError);
-        toast({
-          title: "No se pudo iniciar jsPrintManager",
-          description:
-            serviceError instanceof Error
-              ? serviceError.message
-              : "Revisá tu conexión e intentá nuevamente.",
-          variant: "destructive",
-        });
-        setPrintServiceConnected(false);
-        setPrinterDialogOpen(true);
-        return undefined;
-      }
-
-      const connectionState = await printing.getCurrentWebSocketState();
-      setPrintServiceConnected(connectionState.label === "open");
-
-      if (connectionState.label === "blocked") {
-        toast({
-          title: "Conexión bloqueada",
-          description:
-            "Habilitá los WebSockets para jsPrintManager o revisá la configuración de seguridad del navegador.",
-          variant: "destructive",
-        });
-        setPrinterDialogOpen(true);
-        return undefined;
-      }
-
-      if (connectionState.label === "closed") {
-        toast({
-          title: "Reconectando jsPrintManager",
-          description:
-            "Intentando reestablecer la conexión con el servicio de impresión.",
-        });
-        await printing.initializePrintService().catch(() => undefined);
-      }
-
-      let printers: string[] = [];
-      try {
-        printers = await printing.getPrintersOnce(!savedPrinter);
-        setAvailablePrinters(printers);
-
-        if (printers.length === 0) {
-          toast({
-            title: "No se detectaron impresoras locales",
-            description:
-              "Verificá que haya impresoras instaladas y que jsPrintManager esté en ejecución.",
-            variant: "destructive",
-          });
-        }
-      } catch (listError) {
-        console.error("No se pudieron obtener las impresoras:", listError);
-        toast({
-          title: "No se pudo cargar la lista de impresoras",
-          description:
-            "Revisá tu conexión con jsPrintManager e intentá nuevamente.",
-          variant: "destructive",
-        });
-      }
-
-      if ((!savedPrinter && printers.length > 0) || printers.length === 0) {
-        setPrinterDialogOpen(true);
-      }
-
-      const unsubscribe = printing.onPrintServiceStatusChange(async () => {
-        const latestStatus = await printing.getCurrentWebSocketState();
-        setPrintServiceConnected(latestStatus.label === "open");
-
-        if (latestStatus.label !== "open") {
-          setPrinterDialogOpen(true);
-
-          if (latestStatus.label === "blocked") {
-            toast({
-              title: "WebSocket bloqueado",
-              description:
-                "Habilitá WebSockets para mantener la conexión con la impresora.",
-              variant: "destructive",
-            });
-          } else {
-            toast({
-              title: "Servicio de impresión desconectado",
-              description: "Intentando reconectar con jsPrintManager.",
-            });
-            printing.initializePrintService().catch(() => undefined);
-          }
-        }
-      });
-
-      return unsubscribe;
-    } catch (error) {
-      console.error("Error al iniciar el servicio de impresión:", error);
-      toast({
-        title: "No se pudo conectar con la impresora",
-        description:
-          "Verificá que jsPrintManager esté instalado y el servicio en ejecución.",
-        variant: "destructive",
-      });
-      return undefined;
-    } finally {
-      setLoadingPrinters(false);
-    }
-  };
-
-  useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
-    let cancelled = false;
-
-    (async () => {
-      const teardown = await bootstrapPrinting();
-      if (!cancelled) {
-        unsubscribe = teardown;
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const imprimirTicket = async (
-    venta: VentaRegistradaResponse,
-    entradaNombre: string
-  ) => {
-    try {
-      const printing = await ensurePrintingClient();
-
-      if (!selectedEvent) {
-        toast({
-          title: "Elegí un evento",
-          description: "Seleccioná un evento antes de imprimir el ticket.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const fechaVenta = venta.fecha_venta
-        ? new Date(venta.fecha_venta)
-        : new Date();
-
-      const payload = {
-        tipo:
-          venta.cantidad > 1
-            ? `${entradaNombre} x${venta.cantidad}`
-            : `${entradaNombre}${venta.incluye_trago ? " + Trago" : ""}`,
-        id: String(venta.id_venta ?? venta.id),
-        fecha: fechaVenta.toLocaleDateString("es-AR"),
-        hora: fechaVenta.toLocaleTimeString("es-AR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        controlCode:
-          venta.control_code || `SC-${String(venta.id_venta ?? venta.id)}`,
-        detalle: venta.incluye_trago ? "Incluye trago" : undefined,
-        nota: `Evento #${selectedEvent}`,
-      };
-
-      const escposPayload = {
-        tipo: payload.tipo,
-        id: payload.id,
-        fecha: payload.fecha,
-        hora: payload.hora,
-        tragoGratis: venta.incluye_trago,
-        nota: payload.nota,
-        controlCode: payload.controlCode,
-      };
-
-      if (import.meta.env.VITE_PRINT_SERVER_URL) {
-        try {
-          await printing.sendTicketToEscposServer(escposPayload);
-
-          toast({
-            title: "Ticket enviado a imprimir",
-            description: `Venta #${payload.id} (${payload.tipo})`,
-          });
-
-          return;
-        } catch (serverError) {
-          console.error("No se pudo imprimir vía servidor:", serverError);
-          toast({
-            title: "Servidor de impresión no disponible",
-            description:
-              serverError instanceof Error
-                ? `${serverError.message}. Intentando impresión local...`
-                : "Intentando impresión local...",
-          });
-        }
-      }
-
-      try {
-        await printing.initializePrintService();
-      } catch (serviceError) {
-        console.error(
-          "No se pudo iniciar el servicio de impresión:",
-          serviceError
-        );
-        toast({
-          title: "No se pudo iniciar jsPrintManager",
-          description:
-            serviceError instanceof Error
-              ? serviceError.message
-              : "Revisá la conexión del servicio y volvé a intentar.",
-          variant: "destructive",
-        });
-        setPrinterDialogOpen(true);
-        return;
-      }
-
-      const connectionState = await printing.getCurrentWebSocketState();
-      if (connectionState.label === "blocked") {
-        toast({
-          title: "Conexión bloqueada",
-          description: "Habilitá WebSockets para continuar con la impresión.",
-          variant: "destructive",
-        });
-        setPrintServiceConnected(false);
-        setPrinterDialogOpen(true);
-        return;
-      }
-
-      if (connectionState.label !== "open") {
-        toast({
-          title: "Servicio de impresión desconectado",
-          description:
-            "Intentá reconectar jsPrintManager antes de imprimir el ticket.",
-          variant: "destructive",
-        });
-        setPrintServiceConnected(false);
-        setPrinterDialogOpen(true);
-        await printing.initializePrintService().catch(() => undefined);
-        return;
-      }
-
-      const printerName = selectedPrinter || printing.getSavedPrinter();
-      if (!printerName) {
-        toast({
-          title: "Seleccioná una impresora",
-          description:
-            "Elegí la impresora por defecto para imprimir tus tickets.",
-        });
-        setPrinterDialogOpen(true);
-        return;
-      }
-
-      if (availablePrinters.length === 0) {
-        toast({
-          title: "No se detectaron impresoras locales",
-          description: "Refrescá la lista de impresoras antes de imprimir.",
-          variant: "destructive",
-        });
-        setPrinterDialogOpen(true);
-        return;
-      }
-
-      await printing.printTicket(payload, { printerName });
-
-      toast({
-        title: "Ticket enviado a imprimir",
-        description: `Venta #${payload.id} (${payload.tipo})`,
-      });
-    } catch (printError) {
-      console.error("No se pudo imprimir el ticket:", printError);
-      toast({
-        title: "Venta registrada, pero no se imprimió",
-        description: "Revisá la conexión de la impresora e intentá de nuevo.",
-        variant: "destructive",
-      });
-    }
-  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -508,114 +180,6 @@ export default function Entradas() {
     return acc + cantidad * entrada.precio_base;
   }, 0);
   const variants: StatCounterVariant[] = ["primary", "accent", "success"];
-
-  const refreshPrinters = useCallback(
-    async (forceRefresh = true) => {
-      setLoadingPrinters(true);
-      try {
-        const printing = await ensurePrintingClient();
-        try {
-          await printing.initializePrintService();
-        } catch (serviceError) {
-          console.error("No se pudo iniciar jsPrintManager:", serviceError);
-          toast({
-            title: "No se pudo iniciar jsPrintManager",
-            description:
-              serviceError instanceof Error
-                ? serviceError.message
-                : "Verificá la instalación del servicio de impresión.",
-            variant: "destructive",
-          });
-          setPrinterDialogOpen(true);
-          return;
-        }
-
-        const status = await printing.getCurrentWebSocketState();
-        if (status.label === "blocked") {
-          toast({
-            title: "Conexión bloqueada",
-            description:
-              "Habilitá WebSockets para que jsPrintManager funcione correctamente.",
-            variant: "destructive",
-          });
-          setPrinterDialogOpen(true);
-          return;
-        }
-
-        if (status.label !== "open") {
-          toast({
-            title: "Servicio de impresión desconectado",
-            description:
-              "Reintentaremos la conexión antes de mostrar las impresoras.",
-          });
-          await printing.initializePrintService().catch(() => undefined);
-          setPrinterDialogOpen(true);
-          return;
-        }
-        const printers = await printing.getPrintersOnce(forceRefresh);
-        setAvailablePrinters(printers);
-
-        if (printers.length === 0) {
-          toast({
-            title: "No se detectaron impresoras locales",
-            description:
-              "Revisá que tus impresoras estén instaladas y visibles para jsPrintManager.",
-            variant: "destructive",
-          });
-          setPrinterDialogOpen(true);
-        }
-
-        if (printers.length === 1 && !selectedPrinter) {
-          setSelectedPrinter(printers[0]);
-          printing.saveSelectedPrinter(printers[0]);
-        }
-      } catch (error) {
-        console.error("No se pudieron obtener las impresoras:", error);
-        toast({
-          title: "No se pudo cargar la lista de impresoras",
-          description: "Verificá la conexión y que jsPrintManager esté activo.",
-          variant: "destructive",
-        });
-      } finally {
-        setLoadingPrinters(false);
-      }
-    },
-    [ensurePrintingClient, selectedPrinter, toast]
-  );
-
-  const guardarImpresora = async () => {
-    if (!selectedPrinter) {
-      toast({
-        title: "Seleccioná una impresora",
-        description: "Elegí una impresora antes de guardar.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const printing = await ensurePrintingClient();
-    printing.saveSelectedPrinter(selectedPrinter);
-    setPrinterDialogOpen(false);
-    toast({
-      title: "Impresora guardada",
-      description: `${selectedPrinter} será la impresora por defecto.`,
-    });
-  };
-
-  useEffect(() => {
-    if (
-      printerDialogOpen &&
-      availablePrinters.length === 0 &&
-      !loadingPrinters
-    ) {
-      refreshPrinters(false);
-    }
-  }, [
-    availablePrinters.length,
-    loadingPrinters,
-    printerDialogOpen,
-    refreshPrinters,
-  ]);
 
   const handleCloseEvent = () => {
     if (!selectedEvent) {
@@ -778,10 +342,7 @@ export default function Entradas() {
         incluye_trago: tipoOperacion === "venta" ? incluyeTrago : false,
       };
 
-      const { data } = await api.post<VentaRegistradaResponse>(
-        "/venta_entradas.php",
-        payload
-      );
+      const { data } = await api.post("/venta_entradas.php", payload);
       const eventKey =
         data?.evento_id !== undefined && data?.evento_id !== null
           ? String(data.evento_id)
@@ -825,10 +386,6 @@ export default function Entradas() {
         } correctamente.`,
       });
 
-      if (tipoOperacion === "venta") {
-        await imprimirTicket(data, entrada.nombre);
-      }
-
       cerrarVenta();
     } catch (error) {
       console.error("Error al registrar venta:", error);
@@ -865,51 +422,26 @@ export default function Entradas() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col sm:flex-row items-center gap-4">
         <div className="flex items-center gap-2">
           <Calendar className="text-primary" />
           <span className="font-medium text-foreground">Evento:</span>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 w-full sm:w-auto">
-          <Select
-            value={selectedEvent}
-            onValueChange={(value) => setSelectedEvent(value)}
-          >
-            <SelectTrigger className="w-full sm:w-[260px]">
-              <SelectValue placeholder="Seleccionar evento" />
-            </SelectTrigger>
-            <SelectContent>
-              {events.map((event) => (
-                <SelectItem key={event.id} value={String(event.id)}>
-                  {event.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setPrinterDialogOpen(true)}
-              disabled={loadingPrinters}
-            >
-              {loadingPrinters ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Printer className="mr-2 h-4 w-4" />
-              )}
-              Configurar impresora
-            </Button>
-            <div className="text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">
-                {selectedPrinter || "Sin impresora seleccionada"}
-              </p>
-              <p>
-                Servicio: {printServiceConnected ? "Conectado" : "Desconectado"}
-              </p>
-            </div>
-          </div>
-        </div>
+        <Select
+          value={selectedEvent}
+          onValueChange={(value) => setSelectedEvent(value)}
+        >
+          <SelectTrigger className="w-[260px]">
+            <SelectValue placeholder="Seleccionar evento" />
+          </SelectTrigger>
+          <SelectContent>
+            {events.map((event) => (
+              <SelectItem key={event.id} value={String(event.id)}>
+                {event.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="bg-card border border-border rounded-lg p-6 mb-6">
@@ -1006,80 +538,6 @@ export default function Entradas() {
           </Button>
         </div>
       )}
-
-      <Dialog open={printerDialogOpen} onOpenChange={setPrinterDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Configurar impresora</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="rounded-md border border-border p-3 text-sm">
-              <p className="font-semibold text-foreground">
-                Servicio: {printServiceConnected ? "Conectado" : "Desconectado"}
-              </p>
-              <p className="text-muted-foreground">
-                {printServiceConnected
-                  ? "La conexión con jsPrintManager está activa."
-                  : "Iniciá el servicio y actualizá la lista de impresoras."}
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="printer-select">Impresora por defecto</Label>
-              <Select
-                value={selectedPrinter}
-                onValueChange={(value) => setSelectedPrinter(value)}
-              >
-                <SelectTrigger id="printer-select">
-                  <SelectValue placeholder="Elegí una impresora" />
-                </SelectTrigger>
-                <SelectContent>
-                  {printerOptions.map((printer) => (
-                    <SelectItem key={printer} value={printer}>
-                      {printer}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="flex justify-between items-center gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {availablePrinters.length === 0
-                    ? "No se encontraron impresoras locales."
-                    : `${availablePrinters.length} impresora(s) detectadas.`}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => refreshPrinters(true)}
-                  disabled={loadingPrinters}
-                >
-                  {loadingPrinters && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  )}
-                  Actualizar
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setPrinterDialogOpen(false)}
-              disabled={loadingPrinters}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={guardarImpresora}
-              disabled={!selectedPrinter || loadingPrinters}
-            >
-              Guardar impresora
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={showSummary} onOpenChange={setShowSummary}>
         <DialogContent className="max-w-md">
