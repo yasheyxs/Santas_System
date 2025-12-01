@@ -1,46 +1,38 @@
 import express from "express";
-import bodyParser from "body-parser";
-import escpos from "escpos";
+import escpos from "escpos"; // Importación predeterminada para CommonJS
 import { randomBytes } from "crypto";
 import { printTicket } from "./src/lib/printing/printEscposTicket.js";
 
-// Ensure ESC/POS adapters exist for both USB and network printers.
-escpos.USB = escpos.USB || escpos.Adapter?.USB;
+// Log de depuración para verificar si `escpos.USB` está disponible
+console.log("escpos.USB disponible:", !!escpos.USB);
+
+const device = escpos.USB; // Usamos escpos.USB directamente
+
 escpos.Network = escpos.Network || escpos.Adapter?.Network;
 
 const app = express();
 const port = Number(process.env.PRINT_SERVER_PORT) || 4000;
 
-app.use(bodyParser.json({ limit: "1mb" }));
+app.use(express.json({ limit: "1mb" }));
+
+// Simple CORS handling
+app.use((req, res, next) => {
+  const allowedOrigin = process.env.PRINT_ALLOWED_ORIGIN || "*";
+  res.header("Access-Control-Allow-Origin", allowedOrigin);
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+});
 
 function toNumberOrUndefined(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function buildPrinterDevice() {
-  const networkHost = process.env.PRINTER_NETWORK_HOST;
-  const networkPort =
-    toNumberOrUndefined(process.env.PRINTER_NETWORK_PORT) || 9100;
-
-  if (networkHost) {
-    if (!escpos.Network) {
-      throw new Error("El adaptador de red de escpos no está disponible");
-    }
-
-    return new escpos.Network(networkHost, networkPort);
-  }
-
-  const vendorId = toNumberOrUndefined(process.env.PRINTER_VENDOR_ID);
-  const productId = toNumberOrUndefined(process.env.PRINTER_PRODUCT_ID);
-
-  if (!escpos.USB) {
-    throw new Error("El adaptador USB de escpos no está disponible");
-  }
-
-  return vendorId && productId
-    ? new escpos.USB(vendorId, productId)
-    : new escpos.USB();
 }
 
 function buildControlCode(preferredCode) {
@@ -49,7 +41,18 @@ function buildControlCode(preferredCode) {
   return `CTRL-${randomSuffix}`.toUpperCase();
 }
 
+// Aquí simplificamos la creación del dispositivo, ya que lo intentamos previamente
+function buildPrinterDevice() {
+  if (!device) {
+    throw new Error("El adaptador USB de escpos no está disponible.");
+  }
+
+  return device; // Ya no hace falta crear un nuevo dispositivo, simplemente retornamos el existente
+}
+
 app.post("/imprimir", async (req, res) => {
+  console.log("BODY RECIBIDO >>>", req.body);
+
   const { tipo, id, fecha, hora, tragoGratis, nota, controlCode } =
     req.body || {};
 
@@ -90,10 +93,9 @@ app.get("/salud", (_req, res) => {
   res.json({ status: "ok", printer: Boolean(escpos.USB || escpos.Network) });
 });
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  app.listen(port, () => {
-    console.log(`Servidor de impresión escuchando en http://localhost:${port}`);
-  });
-}
+// Aquí simplemente agregamos app.listen directamente
+app.listen(port, () => {
+  console.log(`Servidor de impresión escuchando en http://localhost:${port}`);
+});
 
 export default app;

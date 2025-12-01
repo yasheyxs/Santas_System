@@ -113,9 +113,9 @@ export default function Entradas() {
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
   const [loadingPrinters, setLoadingPrinters] = useState(false);
   const [printServiceConnected, setPrintServiceConnected] = useState(false);
-  const printingClientRef = useRef<
-    typeof import("@/lib/printing/jsPrintManagerClient") | null
-  >(null);
+  const printingClientRef = useRef<typeof import("@/lib/printing") | null>(
+    null
+  );
 
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }),
@@ -298,6 +298,59 @@ export default function Entradas() {
         return;
       }
 
+      const fechaVenta = venta.fecha_venta
+        ? new Date(venta.fecha_venta)
+        : new Date();
+
+      const payload = {
+        tipo:
+          venta.cantidad > 1
+            ? `${entradaNombre} x${venta.cantidad}`
+            : `${entradaNombre}${venta.incluye_trago ? " + Trago" : ""}`,
+        id: String(venta.id_venta ?? venta.id),
+        fecha: fechaVenta.toLocaleDateString("es-AR"),
+        hora: fechaVenta.toLocaleTimeString("es-AR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        controlCode:
+          venta.control_code || `SC-${String(venta.id_venta ?? venta.id)}`,
+        detalle: venta.incluye_trago ? "Incluye trago" : undefined,
+        nota: `Evento #${selectedEvent}`,
+      };
+
+      const escposPayload = {
+        tipo: payload.tipo,
+        id: payload.id,
+        fecha: payload.fecha,
+        hora: payload.hora,
+        tragoGratis: venta.incluye_trago,
+        nota: payload.nota,
+        controlCode: payload.controlCode,
+      };
+
+      if (import.meta.env.VITE_PRINT_SERVER_URL) {
+        try {
+          await printing.sendTicketToEscposServer(escposPayload);
+
+          toast({
+            title: "Ticket enviado a imprimir",
+            description: `Venta #${payload.id} (${payload.tipo})`,
+          });
+
+          return;
+        } catch (serverError) {
+          console.error("No se pudo imprimir vía servidor:", serverError);
+          toast({
+            title: "Servidor de impresión no disponible",
+            description:
+              serverError instanceof Error
+                ? `${serverError.message}. Intentando impresión local...`
+                : "Intentando impresión local...",
+          });
+        }
+      }
+
       try {
         await printing.initializePrintService();
       } catch (serviceError) {
@@ -362,27 +415,6 @@ export default function Entradas() {
         setPrinterDialogOpen(true);
         return;
       }
-
-      const fechaVenta = venta.fecha_venta
-        ? new Date(venta.fecha_venta)
-        : new Date();
-
-      const payload = {
-        tipo:
-          venta.cantidad > 1
-            ? `${entradaNombre} x${venta.cantidad}`
-            : `${entradaNombre}${venta.incluye_trago ? " + Trago" : ""}`,
-        id: String(venta.id_venta ?? venta.id),
-        fecha: fechaVenta.toLocaleDateString("es-AR"),
-        hora: fechaVenta.toLocaleTimeString("es-AR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        controlCode:
-          venta.control_code || `SC-${String(venta.id_venta ?? venta.id)}`,
-        detalle: venta.incluye_trago ? "Incluye trago" : undefined,
-        nota: `Evento #${selectedEvent}`,
-      };
 
       await printing.printTicket(payload, { printerName });
 
