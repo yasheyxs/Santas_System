@@ -233,15 +233,19 @@ try {
         $venta = $insert->fetch();
         $venta['total'] = (float)$venta['precio_unitario'] * (int)$venta['cantidad'];
 
+        $controlCode = 'SC-' . $venta['id'] . '-' . substr((string)round(microtime(true) * 1000), -6);
+
         echo json_encode([
             'id' => (int)$venta['id'],
+            'id_venta' => (int)$venta['id'],
             'entrada_id' => (int)$venta['entrada_id'],
             'evento_id' => $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
             'cantidad' => (int)$venta['cantidad'],
             'precio_unitario' => (float)$venta['precio_unitario'],
             'incluye_trago' => (bool)$venta['incluye_trago'],
             'fecha_venta' => $venta['fecha_venta'],
-            'total' => (float)$venta['total']
+            'total' => (float)$venta['total'],
+            'control_code' => $controlCode
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
