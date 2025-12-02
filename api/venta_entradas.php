@@ -13,51 +13,44 @@ date_default_timezone_set('America/Argentina/Cordoba');
 
 function generarContenidoTicket(string $tipoEntrada, float $monto, bool $incluyeTrago): string
 {
-    $ancho = 80; // Ancho para impresora térmica de 80mm
-    $linea = str_repeat('-', $ancho); // Línea divisoria
+    $ancho = 48;
+    $linea = str_repeat('-', $ancho);
     $fecha = date('d/m/Y H:i');
     $montoFormateado = '$' . number_format($monto, 2, ',', '.');
 
-    // Convertir todo el texto a ISO-8859-1 para evitar problemas con caracteres no soportados
-    $tipoEntrada = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $tipoEntrada);
-    $fecha = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $fecha);
-    $montoFormateado = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $montoFormateado);
-    $linea = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $linea);
+    $resetImpresora = "\x1B\x40";
+    $lineSpacingNormal = "\x1B\x33\x30";
 
-    // Comando para resetear la impresora a los valores predeterminados
-    $resetImpresora = "\x1B\x40";  // Reset
+    // Fuente normal y grande
+    $fuenteNormal = "\x1D\x21\x00"; // normal
+    $fuenteGrande = "\x1D\x21\x11"; // doble ancho + doble alto
 
-    // Ajustar line spacing al inicio para mayor visibilidad
-    $lineSpacingNormal = "\x1B\x33\x30"; // 48 dots de espaciado (ajustable)
-
-    // Comando para cambiar tamaño de fuente a más grande
-    $cambiarFuente = "\x1B\x21\x01"; // Fuente más grande
-
-    // Estructura del contenido
+    // --- ENCABEZADO ---
     $contenido = [
-        $resetImpresora . $cambiarFuente . str_pad('SANTAS', $ancho, ' ', STR_PAD_BOTH),  // Centrado del nombre de la empresa
-        $linea,  // Línea divisoria
-        str_pad('Entrada: ' . $tipoEntrada, $ancho, ' ', STR_PAD_LEFT),  // Alineación izquierda para tipo de entrada
-        str_pad('Fecha: ' . $fecha, $ancho, ' ', STR_PAD_LEFT),  // Alineación izquierda para la fecha
-        str_pad('Total: ' . $montoFormateado, $ancho, ' ', STR_PAD_LEFT),  // Alineación izquierda para el total
+        $resetImpresora . $fuenteGrande . str_pad('SANTAS', 24, ' ', STR_PAD_BOTH), // en grande
+        $fuenteNormal . $linea,
     ];
 
-    // Agregar el mensaje de "Incluye trago" si corresponde
+    // --- CUERPO ---
+    $contenido[] = 'Entrada: ' . $tipoEntrada;
+    $contenido[] = 'Fecha:   ' . $fecha;
+    $contenido[] = $fuenteGrande . 'TOTAL: ' . $montoFormateado;
+
     if ($incluyeTrago) {
-        $contenido[] = str_pad('¡Incluye trago!', $ancho, ' ', STR_PAD_BOTH);  // Centrado del mensaje
+        $contenido[] = $linea;
+        $contenido[] = str_pad('Incluye trago', $ancho, ' ', STR_PAD_BOTH);
     }
 
-    $contenido[] = $linea;  // Línea divisoria final
+    // --- PIE ---
+    $contenido[] = $linea;
+    $contenido[] = str_pad('Gracias por su compra', $ancho, ' ', STR_PAD_BOTH);
 
-    // Unir todas las líneas del contenido
     $ticket = implode("\n", $contenido);
+    $comandoCorte = "\n\n" . "\x1D\x56\x00";
 
-    // Agregar comandos de corte y salto de línea
-    $comandoCorte = "\n\n" . "\x1D\x56\x00";  // Comando de corte de papel
-
-    // Retornar el contenido completo del ticket
     return $lineSpacingNormal . $ticket . $comandoCorte;
 }
+
 
 
 function enviarAImpresora(string $contenido): void
