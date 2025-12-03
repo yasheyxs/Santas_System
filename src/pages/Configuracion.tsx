@@ -39,11 +39,16 @@ const isProtectedEntrada = (entrada: Entrada | undefined) => {
   return PROTECTED_ENTRADAS.includes(normalizeEntradaName(entrada.nombre));
 };
 
+const isAnticipadaEntrada = (entrada: Entrada | undefined) =>
+  normalizeEntradaName(entrada?.nombre ?? "") === "anticipada";
+
 export default function Configuracion() {
   const [entradas, setEntradas] = useState<Entrada[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const editingEntrada = entradas.find((item) => item.id === editingId);
+  const isEditingAnticipada = isAnticipadaEntrada(editingEntrada);
 
   const [formData, setFormData] = useState({
     nombre: "",
@@ -136,20 +141,31 @@ export default function Configuracion() {
     }
 
     try {
-      const payload = {
-        nombre: formData.nombre,
-        precio_base: parseFloat(formData.precio_base),
-        cambio_automatico: formData.cambio_automatico ? 1 : 0,
-        hora_inicio_cambio: formData.cambio_automatico
-          ? formData.hora_inicio_cambio
-          : null,
-        hora_fin_cambio: formData.cambio_automatico
-          ? formData.hora_fin_cambio
-          : null,
-        nuevo_precio: formData.cambio_automatico
-          ? parseFloat(formData.nuevo_precio || "0")
-          : null,
-      };
+      const payload =
+        editingId && isEditingAnticipada && editingEntrada
+          ? {
+              nombre: editingEntrada.nombre,
+              precio_base: parseFloat(formData.precio_base),
+              cambio_automatico: editingEntrada.cambio_automatico ? 1 : 0,
+              hora_inicio_cambio: editingEntrada.hora_inicio_cambio ?? null,
+              hora_fin_cambio: editingEntrada.hora_fin_cambio ?? null,
+              nuevo_precio: editingEntrada.nuevo_precio ?? null,
+              activo: editingEntrada.activo ?? true,
+            }
+          : {
+              nombre: formData.nombre,
+              precio_base: parseFloat(formData.precio_base),
+              cambio_automatico: formData.cambio_automatico ? 1 : 0,
+              hora_inicio_cambio: formData.cambio_automatico
+                ? formData.hora_inicio_cambio
+                : null,
+              hora_fin_cambio: formData.cambio_automatico
+                ? formData.hora_fin_cambio
+                : null,
+              nuevo_precio: formData.cambio_automatico
+                ? parseFloat(formData.nuevo_precio || "0")
+                : null,
+            };
 
       if (editingId) {
         await api.put(`/entradas.php?id=${editingId}`, payload);
@@ -278,7 +294,13 @@ export default function Configuracion() {
                   }
                   placeholder="Ej: Entrada General"
                   className="h-12 text-base"
+                  disabled={isEditingAnticipada}
                 />
+                {isEditingAnticipada && (
+                  <p className="text-sm text-muted-foreground">
+                    El nombre de la anticipada está protegido.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-3">
@@ -311,6 +333,7 @@ export default function Configuracion() {
                   onCheckedChange={(checked) =>
                     setFormData({ ...formData, cambio_automatico: checked })
                   }
+                  disabled={isEditingAnticipada}
                 />
               </div>
 
@@ -331,6 +354,7 @@ export default function Configuracion() {
                         })
                       }
                       className="h-12 text-base text-white bg-transparent [color-scheme:dark]"
+                      disabled={isEditingAnticipada}
                     />
                   </div>
 
@@ -349,6 +373,7 @@ export default function Configuracion() {
                         })
                       }
                       className="h-12 text-base text-white bg-transparent [color-scheme:dark]"
+                      disabled={isEditingAnticipada}
                     />
                   </div>
 
@@ -368,6 +393,7 @@ export default function Configuracion() {
                       }
                       placeholder="Ej: 8000"
                       className="h-12 text-base"
+                      disabled={isEditingAnticipada}
                     />
                   </div>
                 </>

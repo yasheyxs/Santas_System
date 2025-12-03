@@ -135,64 +135,134 @@ try {
 
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
-        $accion = $input['accion'] ?? null;
+        $accion = $input['accion'] ?? 'crear';
 
-        if ($accion !== 'imprimir') {
-            http_response_code(400);
-            echo json_encode(['error' => 'Acción no soportada.']);
+        if ($accion === 'crear') {
+            $nombre = trim($input['nombre'] ?? '');
+            $entradaId = isset($input['entrada_id']) ? (int) $input['entrada_id'] : null;
+            $eventoId = isset($input['evento_id']) ? (int) $input['evento_id'] : null;
+            $dni = trim($input['dni'] ?? '');
+            $cantidad = isset($input['cantidad']) ? max(1, (int)$input['cantidad']) : 1;
+            $incluyeTrago = filter_var($input['incluye_trago'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+            if ($nombre === '' || !$entradaId) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Faltan campos obligatorios para registrar la anticipada.']);
+                exit;
+            }
+
+            $stmt = $pdo->prepare(<<<SQL
+                INSERT INTO anticipadas (nombre, dni, entrada_id, evento_id, cantidad, incluye_trago)
+                VALUES (:nombre, :dni, :entrada_id, :evento_id, :cantidad, :incluye_trago)
+                RETURNING id;
+            SQL);
+
+            $stmt->execute([
+                ':nombre' => $nombre,
+                ':dni' => $dni ?: null,
+                ':entrada_id' => $entradaId,
+                ':evento_id' => $eventoId ?: null,
+                ':cantidad' => $cantidad,
+                ':incluye_trago' => $incluyeTrago,
+            ]);
+
+            $nuevoId = (int) $stmt->fetchColumn();
+
+            $detalleStmt = $pdo->prepare(<<<SQL
+                SELECT
+                    a.id,
+                    a.nombre,
+                    a.dni,
+                    a.entrada_id,
+                    a.evento_id,
+                    a.cantidad,
+                    a.incluye_trago,
+                    e.nombre AS entrada_nombre,
+                    e.precio_base AS entrada_precio,
+                    ev.nombre AS evento_nombre
+                FROM anticipadas a
+                LEFT JOIN entradas e ON e.id = a.entrada_id
+                LEFT JOIN eventos ev ON ev.id = a.evento_id
+                WHERE a.id = :id
+                LIMIT 1;
+            SQL);
+            $detalleStmt->execute([':id' => $nuevoId]);
+
+            $nuevaAnticipada = $detalleStmt->fetch();
+
+            if ($nuevaAnticipada) {
+                $nuevaAnticipada['id'] = (int)$nuevaAnticipada['id'];
+                $nuevaAnticipada['entrada_id'] = (int)$nuevaAnticipada['entrada_id'];
+                $nuevaAnticipada['cantidad'] = (int)($nuevaAnticipada['cantidad'] ?? 1);
+                $nuevaAnticipada['incluye_trago'] = filter_var($nuevaAnticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
+                $nuevaAnticipada['entrada_precio'] = isset($nuevaAnticipada['entrada_precio']) ? (float)$nuevaAnticipada['entrada_precio'] : 0.0;
+                $nuevaAnticipada['evento_id'] = isset($nuevaAnticipada['evento_id']) ? (int)$nuevaAnticipada['evento_id'] : null;
+            }
+
+            echo json_encode([
+                'success' => true,
+                'mensaje' => 'Anticipada registrada correctamente.',
+                'anticipada' => $nuevaAnticipada,
+            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        $id = isset($input['id']) ? (int) $input['id'] : null;
-        if (!$id) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Debe indicar el ID de la anticipada.']);
+        if ($accion === 'imprimir') {
+            $id = isset($input['id']) ? (int) $input['id'] : null;
+            if (!$id) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Debe indicar el ID de la anticipada.']);
+                exit;
+            }
+
+            $stmt = $pdo->prepare(<<<SQL
+                SELECT
+                    a.id,
+                    a.nombre,
+                    a.dni,
+                    a.entrada_id,
+                    a.evento_id,
+                    a.cantidad,
+                    a.incluye_trago,
+                    e.nombre AS entrada_nombre,
+                    e.precio_base AS entrada_precio,
+                    ev.nombre AS evento_nombre
+                FROM anticipadas a
+                LEFT JOIN entradas e ON e.id = a.entrada_id
+                LEFT JOIN eventos ev ON ev.id = a.evento_id
+                WHERE a.id = :id
+                LIMIT 1;
+            SQL);
+            $stmt->execute([':id' => $id]);
+            $anticipada = $stmt->fetch();
+
+            if (!$anticipada) {
+                http_response_code(404);
+                echo json_encode(['error' => 'No se encontró la entrada anticipada.']);
+                exit;
+            }
+
+            $nombreEntrada = $anticipada['entrada_nombre'] ?? 'Anticipada';
+            $precio = isset($anticipada['entrada_precio']) ? (float) $anticipada['entrada_precio'] : 0.0;
+            $cantidad = isset($anticipada['cantidad']) ? (int) $anticipada['cantidad'] : 1;
+            $incluyeTrago = filter_var($anticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
+
+            imprimirTickets($nombreEntrada, $precio, $cantidad, $incluyeTrago);
+
+            $deleteStmt = $pdo->prepare('DELETE FROM anticipadas WHERE id = :id');
+            $deleteStmt->execute([':id' => $id]);
+
+            echo json_encode([
+                'success' => true,
+                'mensaje' => 'Ticket enviado a impresión y retirado del listado.',
+                'id_eliminado' => $id,
+                'entrada' => $nombreEntrada,
+            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        $stmt = $pdo->prepare(<<<SQL
-            SELECT
-                a.id,
-                a.nombre,
-                a.dni,
-                a.entrada_id,
-                a.evento_id,
-                a.cantidad,
-                a.incluye_trago,
-                e.nombre AS entrada_nombre,
-                e.precio_base AS entrada_precio,
-                ev.nombre AS evento_nombre
-            FROM anticipadas a
-            LEFT JOIN entradas e ON e.id = a.entrada_id
-            LEFT JOIN eventos ev ON ev.id = a.evento_id
-            WHERE a.id = :id
-            LIMIT 1;
-        SQL);
-        $stmt->execute([':id' => $id]);
-        $anticipada = $stmt->fetch();
-
-        if (!$anticipada) {
-            http_response_code(404);
-            echo json_encode(['error' => 'No se encontró la entrada anticipada.']);
-            exit;
-        }
-
-        $nombreEntrada = $anticipada['entrada_nombre'] ?? 'Anticipada';
-        $precio = isset($anticipada['entrada_precio']) ? (float) $anticipada['entrada_precio'] : 0.0;
-        $cantidad = isset($anticipada['cantidad']) ? (int) $anticipada['cantidad'] : 1;
-        $incluyeTrago = filter_var($anticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
-
-        imprimirTickets($nombreEntrada, $precio, $cantidad, $incluyeTrago);
-
-        $deleteStmt = $pdo->prepare('DELETE FROM anticipadas WHERE id = :id');
-        $deleteStmt->execute([':id' => $id]);
-
-        echo json_encode([
-            'success' => true,
-            'mensaje' => 'Ticket enviado a impresión y retirado del listado.',
-            'id_eliminado' => $id,
-            'entrada' => $nombreEntrada,
-        ], JSON_UNESCAPED_UNICODE);
+        http_response_code(400);
+        echo json_encode(['error' => 'Acción no soportada.']);
         exit;
     }
 

@@ -122,11 +122,13 @@ export default function Entradas() {
             .replace(/[\u0300-\u036f]/g, "")
             .toLowerCase();
 
-        const mappedEntradas = data.entradas.map((entrada) => ({
-          id: entrada.id,
-          nombre: entrada.nombre,
-          precio_base: Number(entrada.precio_base),
-        }));
+        const mappedEntradas = data.entradas
+          .map((entrada) => ({
+            id: entrada.id,
+            nombre: entrada.nombre,
+            precio_base: Number(entrada.precio_base),
+          }))
+          .filter((entrada) => normalizeName(entrada.nombre) !== "anticipada");
 
         const sortedEntradas = [...mappedEntradas].sort(
           (entradaA, entradaB) => {
