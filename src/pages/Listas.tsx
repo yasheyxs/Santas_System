@@ -27,6 +27,7 @@ import {
   Crown,
   Loader2,
   Search,
+  Printer,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
@@ -69,6 +70,7 @@ export default function Listas() {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [guestDialogOpen, setGuestDialogOpen] = useState(false);
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
+  const [printingGuestId, setPrintingGuestId] = useState<string | null>(null);
   const [guestForm, setGuestForm] = useState({ fullName: "", document: "" });
 
   // Filtros
@@ -245,6 +247,38 @@ export default function Listas() {
     );
   }, [selectedUser, guestSearch]);
 
+  const handlePrintGuest = async (guest: Guest) => {
+    setPrintingGuestId(guest.id);
+    try {
+      const payload = {
+        nombre: guest.fullName || "Invitado de lista",
+        lista: selectedUser?.name ?? "Lista",
+        documento: guest.document ?? "",
+      };
+
+      const { data } = await api.post("/imprimir_ticket_gratis.php", payload);
+
+      const mensaje =
+        typeof data?.mensaje === "string"
+          ? data.mensaje
+          : "Ticket gratuito enviado a la impresora.";
+
+      toast({
+        title: "Impresión de ticket",
+        description: mensaje,
+      });
+    } catch (error) {
+      console.error("Error al imprimir ticket de lista:", error);
+      toast({
+        title: "No se pudo imprimir",
+        description: "Reintentá en unos segundos.",
+        variant: "destructive",
+      });
+    } finally {
+      setPrintingGuestId(null);
+    }
+  };
+
   if (loading)
     return (
       <div className="flex justify-center py-20 text-muted-foreground">
@@ -388,6 +422,18 @@ export default function Listas() {
                         <TableCell>{g.fullName}</TableCell>
                         <TableCell>{g.document}</TableCell>
                         <TableCell className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={printingGuestId === g.id}
+                            onClick={() => handlePrintGuest(g)}
+                          >
+                            {printingGuestId === g.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Printer className="h-4 w-4" />
+                            )}
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
